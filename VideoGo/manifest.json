@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "VideoGo — Autoplay FAD",
+  "version": "3.0.0",
+  "description": "Fa partire il video al caricamento della pagina sulla piattaforma FAD ForMe. Poi non interviene più.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://fad-for-me.formretail.it/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://fad-for-me.formretail.it/*"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle",
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_title": "VideoGo",
+    "default_popup": "popup.html"
+  }
+}
