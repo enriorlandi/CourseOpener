@@ -93,11 +93,28 @@ def debugger_alive(port: int) -> bool:
         return False
 
 
-def close_dedicated_chrome(profile_dir: Path) -> None:
-    """Chiude SOLO il Chrome lanciato con il profilo dedicato di questo script."""
+def close_dedicated_chrome(profile_dir: Path, timeout: float = 20.0) -> None:
+    """Chiude SOLO il Chrome lanciato con il profilo dedicato di questo script.
+
+    Aspetta che i processi siano davvero spariti: dopo il SIGTERM Chrome puo'
+    metterci diversi secondi. Tornare troppo presto e' peggio che non chiudere
+    affatto, perche' il lancio successivo trova il profilo ancora occupato e
+    Chrome, invece di partire, passa le finestre all'istanza vecchia
+    (ProcessSingleton) e termina: si finisce col browser sbagliato, senza
+    estensione.
+    """
     # Niente trattini iniziali nel pattern: pkill li scambierebbe per opzioni.
-    subprocess.run(["pkill", "-f", f"user-data-dir={profile_dir}"], check=False)
-    time.sleep(2)
+    pattern = f"user-data-dir={profile_dir}"
+    subprocess.run(["pkill", "-f", pattern], check=False)
+    scadenza = time.monotonic() + timeout
+    while time.monotonic() < scadenza:
+        vivi = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+        if vivi.returncode != 0:  # pgrep: 1 = nessun processo
+            return
+        time.sleep(0.5)
+    # Non sono usciti con le buone: SIGKILL, altrimenti il giro parte sbagliato.
+    subprocess.run(["pkill", "-9", "-f", pattern], check=False)
+    time.sleep(1)
 
 
 def ensure_developer_mode(driver: webdriver.Chrome) -> None:
