@@ -24,7 +24,9 @@
 
 const DEFAULTS = {
   enabled: true,
-  startVolume: 0, // 0-100, applicato al player prima del play. 0 = muto
+  startVolume: 10, // 0-100, applicato al player prima del play. 0 = muto
+  // Non metterlo a 0: Chrome rallenta le schede senza audio, il player smette
+  // di scaricare segmenti e il video si blocca finito il buffer (vedi README).
   lastResortMute: true, // se Chrome rifiuta l'autoplay sonoro, riprova a volume 0
   clickPlayButton: true, // per gli eventuali <video> nativi
   windowSec: 45, // per quanto insistere dal caricamento della pagina

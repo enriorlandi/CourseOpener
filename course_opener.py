@@ -54,6 +54,8 @@ SIDEBAR_SELECTOR = "#course-index"
 VIDEOTIME_PATH = "/mod/videotime"
 LOGIN_TIMEOUT = 300  # secondi a disposizione per fare il login a mano
 DEBUG_PORT = 9333  # porta di debug del Chrome dedicato (non la 9222, per non pestare i piedi ad altro)
+SELENIUM_CACHE = Path.home() / ".cache" / "selenium" / "chrome"
+SYSTEM_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -169,6 +171,86 @@ def unpacked_extension_id(path: Path) -> str:
     return "".join(chr(ord("a") + int(c, 16)) for c in digest)
 
 
+def version_key(versione: str) -> tuple[int, ...]:
+    """Da "152.0.7977.42" a (152, 0, 7977, 42), per confrontare le versioni."""
+    try:
+        return tuple(int(pezzo) for pezzo in versione.split("."))
+    except ValueError:
+        return (0,)
+
+
+def chrome_for_testing_binary() -> Path | None:
+    """Binario di Chrome for Testing in cache, quello di versione piu' alta.
+
+    Selenium Manager lo scarica sotto ~/.cache/selenium/chrome/<piattaforma>/.
+    Va puntato esplicitamente: chiedere browser_version = "stable" fa risolvere
+    il canale stable *installato*, cioe' /Applications/Google Chrome.app, che da
+    Chrome 137 ignora --load-extension. Lo script scaricava quindi la CfT ma
+    lanciava il Chrome di sistema, e l'estensione non veniva mai caricata.
+    """
+    if not SELENIUM_CACHE.is_dir():
+        return None
+    trovati = []
+    for schema in (
+        "*/*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "*/*/chrome",  # Linux
+    ):
+        for percorso in SELENIUM_CACHE.glob(schema):
+            parti = percorso.relative_to(SELENIUM_CACHE).parts
+            if len(parti) >= 2:
+                trovati.append((version_key(parti[1]), percorso))
+    return max(trovati)[1] if trovati else None
+
+
+def binary_version(binario: Path) -> str:
+    """Versione dichiarata da un binario Chrome ("" se non risponde)."""
+    try:
+        uscita = subprocess.run(
+            [str(binario), "--version"], capture_output=True, text=True, timeout=15
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for pezzo in uscita.split():
+        if pezzo[:1].isdigit():
+            return pezzo
+    return ""
+
+
+def use_chrome_for_testing(options: Options) -> None:
+    """Fa usare a Selenium Chrome for Testing e non il Chrome installato."""
+    binario = chrome_for_testing_binary()
+    if binario is not None:
+        options.binary_location = str(binario)
+        return
+    # Niente in cache: una versione *numerica* (non "stable") dice a Selenium
+    # Manager di scaricare Chrome for Testing invece di usare quella installata.
+    major = binary_version(Path(SYSTEM_CHROME)).split(".")[0]
+    options.browser_version = major or "stable"
+
+
+def debugger_browser_version(port: int) -> str:
+    """Versione del browser in ascolto sulla porta ("" se non risponde)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as risposta:
+            return json.load(risposta).get("Browser", "")
+    except (urllib.error.URLError, OSError, ValueError):
+        return ""
+
+
+def debugger_is_chrome_for_testing(port: int) -> bool:
+    """True se sulla porta risponde la Chrome for Testing che useremmo noi.
+
+    Serve perche' un giro precedente puo' aver lasciato aperto il Chrome di
+    sistema: riattaccarsi a quello significherebbe un altro giro senza
+    estensione, e quindi senza autoplay.
+    """
+    binario = chrome_for_testing_binary()
+    if binario is None:
+        return True  # non verificabile: meglio non forzare un riavvio inutile
+    attesa = binary_version(binario)
+    return bool(attesa) and debugger_browser_version(port).endswith(attesa)
+
+
 def build_driver(
     profile_dir: Path, port: int = DEBUG_PORT, extension: Path | None = None
 ) -> tuple[webdriver.Chrome, bool]:
@@ -187,9 +269,19 @@ def build_driver(
         # caricano piu' in sessione automatizzata, ne' da cartella ne' da .crx.
         # Chrome for Testing invece le carica: lo scarica Selenium Manager e
         # resta in cache in ~/.cache/selenium.
-        options.browser_version = "stable"
+        use_chrome_for_testing(options)
 
-    if debugger_alive(port):
+    riusabile = debugger_alive(port)
+    if riusabile and extension and not debugger_is_chrome_for_testing(port):
+        print(
+            "Sulla porta di debug c'e' il Chrome di sistema, che non carica "
+            "l'estensione: lo riavvio con Chrome for Testing.",
+            flush=True,
+        )
+        close_dedicated_chrome(profile_dir)
+        riusabile = False
+
+    if riusabile:
         options.debugger_address = f"127.0.0.1:{port}"
         try:
             return webdriver.Chrome(options=options), True
@@ -201,7 +293,7 @@ def build_driver(
         options = Options()
         options.page_load_strategy = "eager"
         if extension:
-            options.browser_version = "stable"
+            use_chrome_for_testing(options)
 
     prepare_clean_start(profile_dir)
     # Profilo dedicato: tiene la sessione e non va in conflitto con il Chrome
