@@ -49,7 +49,10 @@ DEFAULT_PROFILE = Path.home() / ".courseopener" / "chrome-profile"
 DEFAULT_EXTENSION = HERE / "VideoGo"
 DEFAULT_ENV_FILE = HERE / ".env"
 
-CARD_SELECTOR = 'div[data-region="course-content"][data-course-id]'
+# Niente nome di tag davanti: "I miei corsi" ha tre viste e cambia elemento.
+# A schede il corso e' un <div>, in vista Elenco un <li>: imporre "div" faceva
+# trovare zero corsi appena l'utente passava a Elenco.
+CARD_SELECTOR = '[data-region="course-content"][data-course-id]'
 SIDEBAR_SELECTOR = "#course-index"
 VIDEOTIME_PATH = "/mod/videotime"
 LOGIN_TIMEOUT = 300  # secondi a disposizione per fare il login a mano
@@ -487,6 +490,18 @@ def collect_courses(driver: webdriver.Chrome) -> list[dict[str, str]]:
                 title = found[0].get_attribute("title") or found[0].text.strip()
                 if title:
                     break
+        if not title:
+            # Vista Elenco: il titolo non sta in uno span suo, e' un nodo di
+            # testo dentro il link, insieme a etichette per screen reader
+            # ("Titolo del corso", "Il corso e' tra i preferiti") che vanno
+            # tolte, altrimenti finiscono nel nome del corso.
+            title = driver.execute_script(
+                """const copia = arguments[0].cloneNode(true);
+                   copia.querySelectorAll('.sr-only, .hidden, [aria-hidden="true"]')
+                        .forEach((e) => e.remove());
+                   return copia.textContent.trim().replace(/\\s+/g, ' ');""",
+                link,
+            ) or ""
         seen.add(course_id)
         courses.append(
             {
