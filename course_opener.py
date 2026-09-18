@@ -36,6 +36,7 @@ from selenium.common.exceptions import (
     WebDriverException,
 )
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.selenium_manager import SeleniumManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -236,16 +237,33 @@ def binary_version(binario: Path) -> str:
     return ""
 
 
+def download_chrome_for_testing() -> Path | None:
+    """Scarica Chrome for Testing con Selenium Manager, e ne ritorna il binario.
+
+    Non basta chiedere una versione numerica: se quella versione e' anche quella
+    installata sul sistema, Selenium Manager restituisce il Chrome di sistema e
+    non scarica niente. Serve --force-browser-download, che scarica Chrome for
+    Testing anche quando il Chrome installato corrisponde.
+    """
+    major = binary_version(Path(SYSTEM_CHROME)).split(".")[0]
+    argomenti = ["--browser", "chrome", "--force-browser-download"]
+    if major:
+        argomenti += ["--browser-version", major]
+    print("Chrome for Testing non in cache, lo scarico...", flush=True)
+    try:
+        percorsi = SeleniumManager().binary_paths(argomenti)
+    except (WebDriverException, OSError) as exc:
+        print(f"Download di Chrome for Testing non riuscito: {exc}", file=sys.stderr)
+        return None
+    percorso = percorsi.get("browser_path") or ""
+    return Path(percorso) if percorso else None
+
+
 def use_chrome_for_testing(options: Options) -> None:
     """Fa usare a Selenium Chrome for Testing e non il Chrome installato."""
-    binario = chrome_for_testing_binary()
+    binario = chrome_for_testing_binary() or download_chrome_for_testing()
     if binario is not None:
         options.binary_location = str(binario)
-        return
-    # Niente in cache: una versione *numerica* (non "stable") dice a Selenium
-    # Manager di scaricare Chrome for Testing invece di usare quella installata.
-    major = binary_version(Path(SYSTEM_CHROME)).split(".")[0]
-    options.browser_version = major or "stable"
 
 
 def debugger_browser_version(port: int) -> str:
@@ -257,16 +275,46 @@ def debugger_browser_version(port: int) -> str:
         return ""
 
 
+def debugger_binary(port: int) -> Path | None:
+    """Eseguibile del browser in ascolto sulla porta ("" se non identificabile)."""
+    try:
+        pid = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.split()
+        if not pid:
+            return None
+        comando = subprocess.run(
+            ["ps", "-o", "comm=", "-p", pid[0]],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(comando) if comando else None
+
+
 def debugger_is_chrome_for_testing(port: int) -> bool:
     """True se sulla porta risponde la Chrome for Testing che useremmo noi.
 
     Serve perche' un giro precedente puo' aver lasciato aperto il Chrome di
     sistema: riattaccarsi a quello significherebbe un altro giro senza
     estensione, e quindi senza autoplay.
+
+    Il confronto e' sul percorso dell'eseguibile, non sulla versione: da
+    Chrome 153 il Chrome di sistema e Chrome for Testing dichiarano lo stesso
+    numero di versione, quindi la versione non li distingue piu'.
     """
     binario = chrome_for_testing_binary()
     if binario is None:
         return True  # non verificabile: meglio non forzare un riavvio inutile
+    in_ascolto = debugger_binary(port)
+    if in_ascolto is not None:
+        return in_ascolto == binario
+    # lsof/ps non disponibili: ripiego sulla versione, meglio di niente.
     attesa = binary_version(binario)
     return bool(attesa) and debugger_browser_version(port).endswith(attesa)
 
