@@ -29,6 +29,7 @@ const DEFAULTS = {
   // di scaricare segmenti e il video si blocca finito il buffer (vedi README).
   lastResortMute: true, // se Chrome rifiuta l'autoplay sonoro, riprova a volume 0
   clickPlayButton: true, // per gli eventuali <video> nativi
+  startQuality: '240p', // qualità imposta al player Vimeo; '' o 'auto' = lascia decidere lui
   windowSec: 45, // per quanto insistere dal caricamento della pagina
   firstAttemptMs: 1200, // attesa iniziale: VideoTime deve fare il suo setup
   debug: false,
@@ -38,6 +39,7 @@ const VIMEO_ORIGIN = 'https://player.vimeo.com';
 const RETRY_MS = 700;
 const MUTE_AFTER_ATTEMPTS = 6; // ~4 s prima di ripiegare sul muto
 const MAX_CLICKS = 5;
+const MAX_QUALITY_TRIES = 5; // il player accetta setQuality solo a rendition pronte
 const CLICK_COOLDOWN_MS = 2000;
 
 const PLAY_BUTTON_SELECTORS = [
@@ -87,7 +89,15 @@ function collectPlayers() {
   for (const frame of document.querySelectorAll('iframe')) {
     if (!isVimeo(frame)) continue;
     if (players.some((p) => p.frame === frame)) continue;
-    players.push({ frame, started: false, silent: false, attempts: 0, subscribed: false });
+    players.push({
+      frame,
+      started: false,
+      silent: false,
+      attempts: 0,
+      subscribed: false,
+      qualityOk: false,
+      qualityTries: 0,
+    });
     log('trovato player Vimeo', frame.src);
   }
 }
@@ -116,11 +126,22 @@ window.addEventListener('message', (event) => {
   if (data.event === 'ready') {
     log('player pronto');
     subscribe(player);
+    applyQuality(player);
   }
   if (data.event === 'play' || data.event === 'playing') {
     player.started = true;
     startedAny = true;
     log('in riproduzione');
+    // Prima del play le rendition possono non esserci ancora: ora ci sono di
+    // sicuro, e questo è l'ultimo momento utile perché lo script sta per
+    // spegnersi.
+    applyQuality(player);
+  }
+  if (data.method === 'getQuality' || data.event === 'qualitychange') {
+    const attuale = data.event ? data.data && data.data.quality : data.value;
+    player.qualityOk = attuale === String(settings.startQuality || '').trim();
+    log('qualità del player:', attuale);
+    if (!player.qualityOk) applyQuality(player);
   }
   if (data.method === 'getPaused' && data.value === false) {
     player.started = true;
@@ -133,6 +154,24 @@ function subscribe(player) {
   player.subscribed = true;
   send(player, 'addEventListener', 'play');
   send(player, 'addEventListener', 'playing');
+  send(player, 'addEventListener', 'qualitychange');
+}
+
+/**
+ * Inchioda il player a una rendition fissa invece di lasciarlo su "auto".
+ *
+ * Va rimandato più volte: finché il player non ha caricato l'elenco delle
+ * rendition, setQuality non ha nulla su cui agire e viene ignorato in silenzio.
+ * Per sapere se ha attecchito chiediamo getQuality: la risposta arriva sullo
+ * stesso canale postMessage e la gestiamo nel listener.
+ */
+function applyQuality(player) {
+  const voluta = String(settings.startQuality || '').trim();
+  if (!voluta || voluta === 'auto') return;
+  if (player.qualityOk || player.qualityTries >= MAX_QUALITY_TRIES) return;
+  player.qualityTries++;
+  send(player, 'setQuality', voluta);
+  send(player, 'getQuality');
 }
 
 function pushPlayer(player) {
@@ -144,6 +183,7 @@ function pushPlayer(player) {
     // Va mandato anche quando vale 0: senza il comando il player resterebbe al
     // volume che si ritrova, e "muto" non verrebbe rispettato.
     send(player, 'setVolume', Math.min(100, settings.startVolume) / 100);
+    applyQuality(player);
   }
 
   send(player, 'play');
