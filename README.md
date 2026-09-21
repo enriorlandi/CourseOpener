@@ -81,19 +81,31 @@ FAD_USERNAME_03=...     # e così via, fino a FAD_USERNAME_10
 
 ## Comandi da shell
 
-Solo macOS e Linux: `courseopener.zsh` è uno script zsh e usa `pkill`, che su Windows non
-esiste. Lì si richiama `course_opener.py` direttamente, con le opzioni della tabella sopra.
+Una funzione `courseopener` che evita di ricordare le opzioni a memoria, e sa gestire fino a
+dieci account in parallelo. Ce ne sono due versioni con gli stessi comandi, lo stesso `.env`,
+gli stessi profili e le stesse porte: `courseopener.zsh` per macOS e Linux,
+`courseopener.ps1` per Windows.
 
-`courseopener.zsh` definisce una funzione `courseopener` che evita di ricordare le opzioni a
-memoria, e sa gestire fino a dieci account in parallelo. Per installarla, una riga nel proprio
-`~/.zshrc`:
+macOS e Linux — una riga nel proprio `~/.zshrc`:
 
 ```bash
 echo "source $PWD/courseopener.zsh" >> ~/.zshrc && source ~/.zshrc
 ```
 
-Il file ricava da sé la posizione del repo, quindi non ci sono percorsi da correggere a mano
-quando lo si clona su un'altra macchina.
+Windows — una riga nel proprio `$PROFILE` di PowerShell. Il file di profilo spesso non esiste
+ancora, e va creato prima (il `-Force` serve per la cartella, e il `Test-Path` che lo precede
+non è di troppo: su un profilo già esistente `New-Item -Force` lo svuoterebbe):
+
+```powershell
+if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+Add-Content $PROFILE ". $PWD\courseopener.ps1"; . $PROFILE
+```
+
+Se PowerShell rifiuta di caricarlo, la execution policy è troppo stretta:
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+Entrambi i file ricavano da sé la posizione del repo, quindi non ci sono percorsi da correggere
+a mano quando lo si clona su un'altra macchina.
 
 | Comando | Effetto |
 | --- | --- |
@@ -110,13 +122,15 @@ quindi più account possono girare insieme senza vedersi: i cookie stanno nel pr
 diversi significano sessioni diverse. L'account 1 tiene il profilo storico
 `chrome-profile-cft`.
 
-Le credenziali arrivano allo script come variabili d'ambiente, esportate dentro una subshell:
-non restano nella shell di chi lancia il comando e non compaiono nella riga di comando visibile
-con `ps`.
+Le credenziali arrivano allo script come variabili d'ambiente: non restano nella shell di chi
+lancia il comando e non compaiono nella riga di comando, visibile a chiunque elenchi i processi.
+Lo zsh le esporta dentro una subshell; PowerShell non ne ha una, quindi `courseopener.ps1` le
+mette nell'ambiente del solo processo figlio, via `ProcessStartInfo.EnvironmentVariables`.
 
-I profili sono numerati a due cifre di proposito. Lo script chiude il browser con `pkill`
-cercando il percorso del profilo, e quel confronto è per sottostringa: con `account1` e
-`account10`, chiudere il primo si porterebbe via anche il secondo.
+I profili sono numerati a due cifre di proposito. Lo script chiude il browser cercando il
+percorso del profilo nella riga di comando — con `pkill` su macOS e Linux, con `Win32_Process`
+e `taskkill` su Windows — e quel confronto è per sottostringa: con `account1` e `account10`,
+chiudere il primo si porterebbe via anche il secondo.
 
 ## Come funziona, in breve
 
