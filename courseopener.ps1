@@ -132,9 +132,11 @@ function _CourseOpener_Esegui {
 function _CourseOpener_Chiudi {
     param([string]$Profilo)
     $schema = "user-data-dir=$Profilo"
+    # Le virgolette vanno tolte prima di confrontare: Chrome scrive
+    # --user-data-dir="C:\..." con gli apici, e il pattern non li ha.
     $processi = @(
         Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine.Contains($schema) } |
+            Where-Object { $_.CommandLine -and $_.CommandLine.Replace('"', '').Contains($schema) } |
             ForEach-Object { $_.ProcessId }
     )
     foreach ($idProcesso in $processi) {

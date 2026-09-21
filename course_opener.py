@@ -159,16 +159,23 @@ def powershell(script: str, variabili: dict[str, str] | None = None, timeout: fl
 
 
 def chrome_pids(pattern: str) -> list[int]:
-    """PID dei Chrome la cui riga di comando contiene `pattern`.
+    r"""PID dei Chrome la cui riga di comando contiene `pattern`.
 
     Il confronto e' per sottostringa su entrambe le piattaforme: .Contains() di
     PowerShell e' letterale come "pkill -f", senza i caratteri jolly che -like
     interpreterebbe dentro un percorso.
+
+    Le virgolette vanno tolte prima di confrontare. Windows conserva la riga di
+    comando come stringa unica, e Chrome ci scrive --user-data-dir="C:\..."
+    con gli apici; pkill -f invece vede gli argomenti gia' divisi, senza. Senza
+    questo Replace il pattern non trovava mai niente e la chiusura falliva in
+    silenzio: il giro successivo si riattaccava al browser vecchio.
     """
     if IS_WINDOWS:
         uscita = powershell(
             "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-            "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:CO_PATTERN) } | "
+            "Where-Object { $_.CommandLine -and "
+            "$_.CommandLine.Replace('\"', '').Contains($env:CO_PATTERN) } | "
             "ForEach-Object { $_.ProcessId }",
             {"CO_PATTERN": pattern},
         )
@@ -201,17 +208,29 @@ def close_dedicated_chrome(profile_dir: Path, timeout: float = 20.0) -> None:
     Chrome, invece di partire, passa le finestre all'istanza vecchia
     (ProcessSingleton) e termina: si finisce col browser sbagliato, senza
     estensione.
+
+    Quanto valga la pena insistere con le buone dipende dal sistema. Il SIGTERM
+    chiude il browser per intero, e Chrome merita il tempo di farlo con calma.
+    Il WM_CLOSE di taskkill invece chiude una finestra: con piu' corsi aperti
+    ne resta sempre qualcuna, il browser non esce, e aspettare venti secondi
+    prima delle maniere forti e' tempo buttato a ogni giro. Il pasticcio che
+    ne verrebbe lo ripara comunque prepare_clean_start().
     """
     pattern = f"user-data-dir={profile_dir}"
     terminate_chrome(pattern, force=False)
+    grazia = 5.0 if IS_WINDOWS else timeout
     scadenza = time.monotonic() + timeout
+    fine_grazia = time.monotonic() + grazia
+    forzato = False
     while time.monotonic() < scadenza:
         if not chrome_pids(pattern):
             return
+        if not forzato and time.monotonic() >= fine_grazia:
+            forzato = True
+            terminate_chrome(pattern, force=True)
         time.sleep(0.5)
-    # Non sono usciti con le buone: le maniere forti, altrimenti il giro parte
-    # sbagliato.
-    terminate_chrome(pattern, force=True)
+    if not forzato:
+        terminate_chrome(pattern, force=True)
     time.sleep(1)
 
 
