@@ -1,6 +1,7 @@
 const DEFAULTS = {
   enabled: true,
   startVolume: 0,
+  startQuality: '240p',
   lastResortMute: true,
   clickPlayButton: true,
   resumeIfPaused: false,
@@ -18,6 +19,13 @@ chrome.storage.sync.get(DEFAULTS, (stored) => {
   vol.value = String(stored.startVolume);
   vol.addEventListener('change', () =>
     chrome.storage.sync.set({ startVolume: Number(vol.value) })
+  );
+  // Qui il valore resta una stringa: sono gli id delle rendition di Vimeo
+  // ('240p', 'auto'), non numeri.
+  const qual = document.getElementById('startQuality');
+  qual.value = String(stored.startQuality);
+  qual.addEventListener('change', () =>
+    chrome.storage.sync.set({ startQuality: qual.value })
   );
 });
 

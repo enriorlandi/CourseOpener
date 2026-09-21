@@ -27,6 +27,11 @@ const DEFAULTS = {
   startVolume: 10, // 0-100, applicato al player prima del play. 0 = muto
   // Non metterlo a 0: Chrome rallenta le schede senza audio, il player smette
   // di scaricare segmenti e il video si blocca finito il buffer (vedi README).
+
+  // Una lezione parlata non ha bisogno di piu' di questo, e con venti schede
+  // aperte la banda e la CPU risparmiate sono la differenza fra un giro che
+  // scorre e uno che arranca. 'auto' lascia decidere al player.
+  startQuality: '240p', // 'auto' | '240p' | '360p' | '540p' | '720p' | '1080p'
   lastResortMute: true, // se Chrome rifiuta l'autoplay sonoro, riprova a volume 0
   clickPlayButton: true, // per gli eventuali <video> nativi
   windowSec: 45, // per quanto insistere dal caricamento della pagina
@@ -37,6 +42,7 @@ const DEFAULTS = {
 const VIMEO_ORIGIN = 'https://player.vimeo.com';
 const RETRY_MS = 700;
 const MUTE_AFTER_ATTEMPTS = 6; // ~4 s prima di ripiegare sul muto
+const MAX_QUALITY_TRIES = 8; // ~6 s di tentativi sulla qualita', poi lasciamo stare
 const MAX_CLICKS = 5;
 const CLICK_COOLDOWN_MS = 2000;
 
@@ -87,7 +93,15 @@ function collectPlayers() {
   for (const frame of document.querySelectorAll('iframe')) {
     if (!isVimeo(frame)) continue;
     if (players.some((p) => p.frame === frame)) continue;
-    players.push({ frame, started: false, silent: false, attempts: 0, subscribed: false });
+    players.push({
+      frame,
+      started: false,
+      silent: false,
+      attempts: 0,
+      subscribed: false,
+      quality: null, // qualita' confermata dal player, non quella richiesta
+      qualityTries: 0,
+    });
     log('trovato player Vimeo', frame.src);
   }
 }
@@ -121,6 +135,16 @@ window.addEventListener('message', (event) => {
     player.started = true;
     startedAny = true;
     log('in riproduzione');
+    // Il momento piu' affidabile per fissare la qualita': a video fermo le
+    // rendition possono non essere ancora note e il comando cade nel vuoto.
+    applyQuality(player);
+  }
+  if (data.event === 'qualitychange') {
+    const q = data.data && data.data.quality;
+    log('qualita video', q);
+    // Solo la qualita' che abbiamo chiesto chiude la partita: se il player
+    // cambia per conto suo, continuiamo a insistere finche' abbiamo tentativi.
+    if (q === settings.startQuality) player.quality = q;
   }
   if (data.method === 'getPaused' && data.value === false) {
     player.started = true;
@@ -133,17 +157,39 @@ function subscribe(player) {
   player.subscribed = true;
   send(player, 'addEventListener', 'play');
   send(player, 'addEventListener', 'playing');
+  send(player, 'addEventListener', 'qualitychange');
+}
+
+/** True finche' vale la pena rimandare il comando di qualita'. */
+function qualityPending(player) {
+  return (
+    settings.startQuality !== 'auto' &&
+    !player.quality &&
+    player.qualityTries < MAX_QUALITY_TRIES
+  );
+}
+
+function applyQuality(player) {
+  if (!qualityPending(player)) return;
+  player.qualityTries++;
+  send(player, 'setQuality', settings.startQuality);
 }
 
 function pushPlayer(player) {
-  if (player.started) return;
   subscribe(player);
+  if (player.started) {
+    // Gia' partito: non c'e' altro da spingere, ma la qualita' puo' non aver
+    // ancora fatto presa.
+    applyQuality(player);
+    return;
+  }
   player.attempts++;
 
   if (player.attempts === 1) {
     // Va mandato anche quando vale 0: senza il comando il player resterebbe al
     // volume che si ritrova, e "muto" non verrebbe rispettato.
     send(player, 'setVolume', Math.min(100, settings.startVolume) / 100);
+    applyQuality(player);
   }
 
   send(player, 'play');
@@ -271,7 +317,7 @@ async function tick() {
   for (const p of players) pushPlayer(p);
   const videoOk = await pushVideo();
 
-  const vimeoPending = players.some((p) => !p.started);
+  const vimeoPending = players.some((p) => !p.started || qualityPending(p));
   const videoPending = !videoOk && !!mainVideo();
   if (!vimeoPending && !videoPending && (players.length || videoOk)) stop();
 }

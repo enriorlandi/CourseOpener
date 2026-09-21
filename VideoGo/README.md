@@ -46,11 +46,18 @@ Sequenza per ogni player trovato:
 
 1. attesa di 1,2 s, per lasciare a VideoTime il tempo di inizializzare il player
    e di riprendere dal punto giusto (`resume_playback`)
-2. `setVolume` al volume d'avvio (10% di default), poi `play`
+2. `setVolume` al volume d'avvio (10% di default) e `setQuality` alla qualità
+   d'avvio (240p di default), poi `play`
 3. `getPaused` per sapere se il comando ha fatto effetto — lo stato non è dedotto
    ma chiesto al player
 4. dopo ~4 s senza risultato, se **Muta come ultima spiaggia** è attivo,
    `setVolume 0` e nuovo `play`
+
+Il `setQuality` viene rimandato anche subito dopo l'evento `play`, ed è lì che di
+norma fa presa: a video fermo il player può non conoscere ancora le rendition
+disponibili e il comando cade nel vuoto. Si insiste al massimo otto volte, e si
+smette quando il player conferma con l'evento `qualitychange` — la qualità non
+viene data per impostata solo perché è stata chiesta.
 
 Riprova ogni 700 ms per **45 secondi**, poi si ferma comunque. Appena il video
 parte lo script si spegne: con venti schede aperte il costo dopo i primi secondi
@@ -96,6 +103,10 @@ qualche sessione concede l'autoplay sonoro.
 ## Opzioni
 
 - **Volume all'avvio** — vedi sopra. Il muto è disponibile ma sconsigliato.
+- **Qualità video** — 240p di default: per una lezione parlata basta, e con venti
+  schede aperte la banda e la CPU risparmiate si sentono. `Auto` lascia decidere
+  al player. Se il video non ha la rendition scelta, il player tiene quella che
+  ha.
 - **Muta come ultima spiaggia** — il punto 4 della sequenza.
 - **Clicca il pulsante play** — vale solo per eventuali `<video>` nel DOM.
 - **Sorveglia dopo l'avvio** — lascialo spento: la piattaforma gestisce già la
