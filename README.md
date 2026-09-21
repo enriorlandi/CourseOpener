@@ -36,6 +36,16 @@ FAD_PASSWORD=...
 Il file è già in `.gitignore` e nasce con permessi `600`. Se non lo compili, lo script apre il
 browser e aspetta che il login lo faccia tu a mano.
 
+Per più account di test, che condividono la password e differiscono solo nell'username, lo
+stesso file accetta altre righe numerate — le usa `courseopener.zsh`, non lo script:
+
+```
+FAD_PASSWORD=...
+FAD_USERNAME=...        # account 1
+FAD_USERNAME_02=...     # account 2
+FAD_USERNAME_03=...     # e così via, fino a FAD_USERNAME_10
+```
+
 ## Uso
 
 ```bash
@@ -54,6 +64,42 @@ browser e aspetta che il login lo faccia tu a mano.
 | `--no-auto-login` | ignora il `.env` e fa fare il login a mano |
 | `--profile PATH` | cartella del profilo browser |
 | `--port N` | porta di debug (default 9333) |
+
+## Comandi da shell
+
+`courseopener.zsh` definisce una funzione `courseopener` che evita di ricordare le opzioni a
+memoria, e sa gestire fino a dieci account in parallelo. Per installarla, una riga nel proprio
+`~/.zshrc`:
+
+```bash
+echo "source $PWD/courseopener.zsh" >> ~/.zshrc && source ~/.zshrc
+```
+
+Il file ricava da sé la posizione del repo, quindi non ci sono percorsi da correggere a mano
+quando lo si clona su un'altra macchina.
+
+| Comando | Effetto |
+| --- | --- |
+| `courseopener run` | giro completo sull'account 1 |
+| `courseopener run 3` | giro completo sull'account 3 |
+| `courseopener run 3 --max 5` | dopo il numero, le opzioni dello script |
+| `courseopener stop 3` | chiude il browser di quell'account |
+| `courseopener stop all` | chiude tutti |
+| `courseopener status` | account compilati, porta e se stanno girando |
+| `courseopener init` | aggiunge al `.env` le righe username mancanti |
+
+Ogni account ha profilo e porta propri — `~/.courseopener/account-NN` e porte da 9333 a 9342 —
+quindi più account possono girare insieme senza vedersi: i cookie stanno nel profilo, e profili
+diversi significano sessioni diverse. L'account 1 tiene il profilo storico
+`chrome-profile-cft`.
+
+Le credenziali arrivano allo script come variabili d'ambiente, esportate dentro una subshell:
+non restano nella shell di chi lancia il comando e non compaiono nella riga di comando visibile
+con `ps`.
+
+I profili sono numerati a due cifre di proposito. Lo script chiude il browser con `pkill`
+cercando il percorso del profilo, e quel confronto è per sottostringa: con `account1` e
+`account10`, chiudere il primo si porterebbe via anche il secondo.
 
 ## Come funziona, in breve
 
