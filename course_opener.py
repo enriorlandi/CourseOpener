@@ -259,11 +259,31 @@ def download_chrome_for_testing() -> Path | None:
     return Path(percorso) if percorso else None
 
 
+def binario_utilizzabile(binario: Path) -> bool:
+    """True se il binario c'e' davvero e risponde a --version.
+
+    Non basta che il percorso esista. Selenium Manager fa pulizia della propria
+    cache e puo' portarsi via un'installazione a meta': il glob trova ancora
+    l'eseguibile dentro l'.app, ma mancano i Frameworks e l'errore arriva dopo,
+    da dentro Selenium, come "Browser path does not exist".
+    """
+    return binario.is_file() and bool(binary_version(binario))
+
+
 def use_chrome_for_testing(options: Options) -> None:
     """Fa usare a Selenium Chrome for Testing e non il Chrome installato."""
-    binario = chrome_for_testing_binary() or download_chrome_for_testing()
-    if binario is not None:
-        options.binary_location = str(binario)
+    binario = chrome_for_testing_binary()
+    if binario is not None and not binario_utilizzabile(binario):
+        print(f"Chrome for Testing in cache inservibile ({binario}), lo riscarico.", flush=True)
+        binario = None
+    if binario is None:
+        binario = download_chrome_for_testing()
+    if binario is None or not binario_utilizzabile(binario):
+        raise SystemExit(
+            "Chrome for Testing non disponibile. Svuota la cache e riprova:\n"
+            f"  rm -rf {SELENIUM_CACHE}"
+        )
+    options.binary_location = str(binario)
 
 
 def debugger_browser_version(port: int) -> str:
@@ -419,6 +439,38 @@ def fill_login_form(driver: webdriver.Chrome, username: str, password: str, atte
     return False
 
 
+# Moodle protegge il form con un "logintoken" che invecchia: su una pagina di
+# login rimasta aperta (o ereditata dal giro precedente) il primo invio torna
+# "La sessione e' scaduta" anche con le credenziali giuste.
+SESSIONE_SCADUTA = ("sessione", "session has expired", "token")
+
+
+def esito_login(driver: webdriver.Chrome, url: str) -> tuple[str, str]:
+    """Aspetta l'esito dell'invio: ok / scaduta / rifiutato / timeout."""
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if "/login/" not in current_url(driver):
+            driver.get(url)
+            if is_courses_page(driver):
+                return "ok", ""
+            # Fuori dalla pagina di login gli avvisi non parlano di login:
+            # ".alert-danger" e' la classe di qualunque notifica Moodle, e una
+            # lezione bloccata da un prerequisito ne mostra una. Presa per un
+            # errore di autenticazione, faceva rinunciare a un login riuscito.
+            time.sleep(1)
+            continue
+        for selector in (".loginerrors", "#loginerrormessage", ".alert-danger"):
+            errors = driver.find_elements(By.CSS_SELECTOR, selector)
+            if errors and errors[0].text.strip():
+                messaggio = errors[0].text.strip()
+                basso = messaggio.lower()
+                if any(spia in basso for spia in SESSIONE_SCADUTA):
+                    return "scaduta", messaggio
+                return "rifiutato", messaggio
+        time.sleep(1)
+    return "timeout", ""
+
+
 def auto_login(driver: webdriver.Chrome, username: str, password: str, url: str) -> bool:
     """Compila il form di login Moodle con le credenziali lette dal .env.
 
@@ -429,24 +481,26 @@ def auto_login(driver: webdriver.Chrome, username: str, password: str, url: str)
         driver.get(LOGIN_URL)
 
     print("Login automatico in corso...", flush=True)
-    if not fill_login_form(driver, username, password):
-        print("Form di login non compilabile: procedo col login manuale.", flush=True)
-        return False
+    for tentativo in (1, 2):
+        if not fill_login_form(driver, username, password):
+            print("Form di login non compilabile: procedo col login manuale.", flush=True)
+            return False
 
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        if "/login/" not in current_url(driver):
-            driver.get(url)
-            if is_courses_page(driver):
-                print("Login automatico riuscito.", flush=True)
-                return True
-        for selector in (".loginerrors", "#loginerrormessage", ".alert-danger"):
-            errors = driver.find_elements(By.CSS_SELECTOR, selector)
-            if errors and errors[0].text.strip():
-                print(f"Login rifiutato dal sito: {errors[0].text.strip()}", flush=True)
-                return False
-        time.sleep(1)
-    print("Login automatico non concluso in tempo.", flush=True)
+        esito, messaggio = esito_login(driver, url)
+        if esito == "ok":
+            print("Login automatico riuscito.", flush=True)
+            return True
+        if esito == "scaduta" and tentativo == 1:
+            # Non e' un rifiuto delle credenziali: il form era vecchio. Ne
+            # prendiamo uno nuovo, con un token valido, e lo rimandiamo.
+            print("Token del form scaduto, ricarico la pagina e riprovo.", flush=True)
+            driver.get(LOGIN_URL)
+            continue
+        if esito == "timeout":
+            print("Login automatico non concluso in tempo.", flush=True)
+        else:
+            print(f"Login rifiutato dal sito: {messaggio}", flush=True)
+        return False
     return False
 
 
