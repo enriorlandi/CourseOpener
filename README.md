@@ -36,6 +36,10 @@ python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
+Se `python` apre il Microsoft Store invece di partire, Python non c'è: quello che risponde è
+l'alias segnaposto di Windows. Si installa con `winget install Python.Python.3.13`, poi si
+riapre il terminale — il `PATH` lo leggono solo i processi avviati dopo.
+
 Poi le credenziali della piattaforma nel file `.env`:
 
 ```
