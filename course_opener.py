@@ -59,7 +59,24 @@ VIDEOTIME_PATH = "/mod/videotime"
 LOGIN_TIMEOUT = 300  # secondi a disposizione per fare il login a mano
 DEBUG_PORT = 9333  # porta di debug del Chrome dedicato (non la 9222, per non pestare i piedi ad altro)
 SELENIUM_CACHE = Path.home() / ".cache" / "selenium" / "chrome"
-SYSTEM_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+IS_WINDOWS = os.name == "nt"
+# Chrome installato sul sistema, per piattaforma. Serve solo come riferimento di
+# versione per scaricare la Chrome for Testing corrispondente: il browser che lo
+# script pilota e' sempre la CfT, mai questo.
+SYSTEM_CHROME_CANDIDATES = {
+    "darwin": ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",),
+    "win32": (
+        r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe",
+        r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe",
+        r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+    ),
+}
+SYSTEM_CHROME_FALLBACK = (  # Linux e il resto
+    "/opt/google/chrome/chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+)
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -97,6 +114,84 @@ def debugger_alive(port: int) -> bool:
         return False
 
 
+def system_chrome() -> Path | None:
+    """Chrome installato sul sistema, None se non si trova."""
+    for grezzo in SYSTEM_CHROME_CANDIDATES.get(sys.platform, SYSTEM_CHROME_FALLBACK):
+        percorso = Path(os.path.expandvars(grezzo))
+        if percorso.is_file():
+            return percorso
+    return None
+
+
+def run_text(comando: list[str], timeout: float = 20.0) -> str:
+    """stdout di un comando esterno ("" se non parte, fallisce o va in timeout).
+
+    Serve perche' i comandi di sistema qui sotto non esistono ovunque: pkill e
+    lsof mancano su Windows, e subprocess solleva FileNotFoundError a
+    prescindere da check=False.
+    """
+    try:
+        return subprocess.run(
+            comando, capture_output=True, text=True, timeout=timeout
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def powershell(script: str, variabili: dict[str, str] | None = None, timeout: float = 20.0) -> str:
+    """stdout di uno script PowerShell ("" se fallisce).
+
+    Gli argomenti passano da variabili d'ambiente invece di essere interpolati
+    nel testo dello script: un percorso con spazi, apici o parentesi quadre
+    romperebbe il quoting, e qui i percorsi arrivano dal profilo dell'utente.
+    """
+    ambiente = dict(os.environ, **(variabili or {}))
+    try:
+        return subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=ambiente,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def chrome_pids(pattern: str) -> list[int]:
+    """PID dei Chrome la cui riga di comando contiene `pattern`.
+
+    Il confronto e' per sottostringa su entrambe le piattaforme: .Contains() di
+    PowerShell e' letterale come "pkill -f", senza i caratteri jolly che -like
+    interpreterebbe dentro un percorso.
+    """
+    if IS_WINDOWS:
+        uscita = powershell(
+            "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:CO_PATTERN) } | "
+            "ForEach-Object { $_.ProcessId }",
+            {"CO_PATTERN": pattern},
+        )
+    else:
+        uscita = run_text(["pgrep", "-f", pattern])
+    return [int(riga) for riga in uscita.split() if riga.isdigit()]
+
+
+def terminate_chrome(pattern: str, force: bool) -> None:
+    """Chiede ai Chrome che corrispondono a `pattern` di chiudersi."""
+    if IS_WINDOWS:
+        for pid in chrome_pids(pattern):
+            # Senza /F taskkill manda WM_CLOSE alla finestra: e' l'equivalente
+            # del SIGTERM, Chrome fa in tempo a chiudere la sessione pulita.
+            comando = ["taskkill", "/PID", str(pid)]
+            if force:
+                comando += ["/F", "/T"]
+            run_text(comando)
+        return
+    # Niente trattini iniziali nel pattern: pkill li scambierebbe per opzioni.
+    run_text(["pkill", *(["-9"] if force else []), "-f", pattern])
+
+
 def close_dedicated_chrome(profile_dir: Path, timeout: float = 20.0) -> None:
     """Chiude SOLO il Chrome lanciato con il profilo dedicato di questo script.
 
@@ -107,17 +202,16 @@ def close_dedicated_chrome(profile_dir: Path, timeout: float = 20.0) -> None:
     (ProcessSingleton) e termina: si finisce col browser sbagliato, senza
     estensione.
     """
-    # Niente trattini iniziali nel pattern: pkill li scambierebbe per opzioni.
     pattern = f"user-data-dir={profile_dir}"
-    subprocess.run(["pkill", "-f", pattern], check=False)
+    terminate_chrome(pattern, force=False)
     scadenza = time.monotonic() + timeout
     while time.monotonic() < scadenza:
-        vivi = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
-        if vivi.returncode != 0:  # pgrep: 1 = nessun processo
+        if not chrome_pids(pattern):
             return
         time.sleep(0.5)
-    # Non sono usciti con le buone: SIGKILL, altrimenti il giro parte sbagliato.
-    subprocess.run(["pkill", "-9", "-f", pattern], check=False)
+    # Non sono usciti con le buone: le maniere forti, altrimenti il giro parte
+    # sbagliato.
+    terminate_chrome(pattern, force=True)
     time.sleep(1)
 
 
@@ -187,8 +281,15 @@ def unpacked_extension_id(path: Path) -> str:
     E' l'hash SHA-256 del percorso assoluto: i primi 32 nibble mappati su a-p.
     Serve per raggiungere le sue pagine (chrome-extension://<id>/...) e quindi
     per verificare che sia stata caricata davvero.
+
+    L'hash e' sui byte nativi del percorso, che non sono gli stessi ovunque:
+    Chrome passa alla SHA-256 il base::FilePath, che su Windows e' una
+    std::wstring (UTF-16LE) e altrove una std::string (UTF-8). Con UTF-8 su
+    Windows viene fuori un ID plausibile ma sbagliato, e le pagine
+    dell'estensione rispondono ERR_BLOCKED_BY_CLIENT invece che 404.
     """
-    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:32]
+    grezzo = str(path).encode("utf-16-le" if IS_WINDOWS else "utf-8")
+    digest = hashlib.sha256(grezzo).hexdigest()[:32]
     return "".join(chr(ord("a") + int(c, 16)) for c in digest)
 
 
@@ -205,7 +306,7 @@ def chrome_for_testing_binary() -> Path | None:
 
     Selenium Manager lo scarica sotto ~/.cache/selenium/chrome/<piattaforma>/.
     Va puntato esplicitamente: chiedere browser_version = "stable" fa risolvere
-    il canale stable *installato*, cioe' /Applications/Google Chrome.app, che da
+    il canale stable *installato* (vedi system_chrome()), che da
     Chrome 137 ignora --load-extension. Lo script scaricava quindi la CfT ma
     lanciava il Chrome di sistema, e l'estensione non veniva mai caricata.
     """
@@ -214,6 +315,7 @@ def chrome_for_testing_binary() -> Path | None:
     trovati = []
     for schema in (
         "*/*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "*/*/chrome.exe",  # Windows
         "*/*/chrome",  # Linux
     ):
         for percorso in SELENIUM_CACHE.glob(schema):
@@ -224,14 +326,17 @@ def chrome_for_testing_binary() -> Path | None:
 
 
 def binary_version(binario: Path) -> str:
-    """Versione dichiarata da un binario Chrome ("" se non risponde)."""
-    try:
-        uscita = subprocess.run(
-            [str(binario), "--version"], capture_output=True, text=True, timeout=15
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    for pezzo in uscita.split():
+    """Versione dichiarata da un binario Chrome ("" se non si riesce a leggerla)."""
+    if IS_WINDOWS:
+        # Su Windows "chrome.exe --version" non serve: e' un eseguibile GUI, non
+        # scrive sulla console del processo che lo lancia, e invece di uscire
+        # apre il browser e resta aperto finche' non lo si uccide. La versione
+        # sta nelle risorse del file, e si legge senza eseguire niente.
+        return powershell(
+            "(Get-Item -LiteralPath $env:CO_BINARY).VersionInfo.ProductVersion",
+            {"CO_BINARY": str(binario)},
+        ).strip()
+    for pezzo in run_text([str(binario), "--version"], timeout=15).split():
         if pezzo[:1].isdigit():
             return pezzo
     return ""
@@ -245,7 +350,8 @@ def download_chrome_for_testing() -> Path | None:
     non scarica niente. Serve --force-browser-download, che scarica Chrome for
     Testing anche quando il Chrome installato corrisponde.
     """
-    major = binary_version(Path(SYSTEM_CHROME)).split(".")[0]
+    installato = system_chrome()
+    major = binary_version(installato).split(".")[0] if installato else ""
     argomenti = ["--browser", "chrome", "--force-browser-download"]
     if major:
         argomenti += ["--browser-version", major]
@@ -276,24 +382,19 @@ def debugger_browser_version(port: int) -> str:
 
 
 def debugger_binary(port: int) -> Path | None:
-    """Eseguibile del browser in ascolto sulla porta ("" se non identificabile)."""
-    try:
-        pid = subprocess.run(
-            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.split()
-        if not pid:
-            return None
-        comando = subprocess.run(
-            ["ps", "-o", "comm=", "-p", pid[0]],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    """Eseguibile del browser in ascolto sulla porta (None se non identificabile)."""
+    if IS_WINDOWS:
+        percorso = powershell(
+            "$c = Get-NetTCPConnection -LocalPort $env:CO_PORT -State Listen "
+            "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+            "if ($c) { (Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue).Path }",
+            {"CO_PORT": str(port)},
+        ).strip()
+        return Path(percorso) if percorso else None
+    pid = run_text(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], timeout=10).split()
+    if not pid:
         return None
+    comando = run_text(["ps", "-o", "comm=", "-p", pid[0]], timeout=10).strip()
     return Path(comando) if comando else None
 
 
@@ -314,7 +415,8 @@ def debugger_is_chrome_for_testing(port: int) -> bool:
     in_ascolto = debugger_binary(port)
     if in_ascolto is not None:
         return in_ascolto == binario
-    # lsof/ps non disponibili: ripiego sulla versione, meglio di niente.
+    # Processo in ascolto non identificabile: ripiego sulla versione, meglio
+    # di niente.
     attesa = binary_version(binario)
     return bool(attesa) and debugger_browser_version(port).endswith(attesa)
 

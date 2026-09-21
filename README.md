@@ -18,12 +18,22 @@ video da sola.
 - Python 3.10+
 - Google Chrome installato (serve come riferimento di versione; il browser effettivamente
   usato è Chrome for Testing, scaricato da solo al primo avvio)
+- macOS, Windows o Linux
 
 ## Installazione
+
+macOS e Linux:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
 Poi le credenziali della piattaforma nel file `.env`:
@@ -33,8 +43,8 @@ FAD_USERNAME=...
 FAD_PASSWORD=...
 ```
 
-Il file è già in `.gitignore` e nasce con permessi `600`. Se non lo compili, lo script apre il
-browser e aspetta che il login lo faccia tu a mano.
+Il file è già in `.gitignore`; su macOS e Linux nasce con permessi `600`. Se non lo compili, lo
+script apre il browser e aspetta che il login lo faccia tu a mano.
 
 Per più account di test, che condividono la password e differiscono solo nell'username, lo
 stesso file accetta altre righe numerate — le usa `courseopener.zsh`, non lo script:
@@ -49,7 +59,11 @@ FAD_USERNAME_03=...     # e così via, fino a FAD_USERNAME_10
 ## Uso
 
 ```bash
-.venv/bin/python course_opener.py
+.venv/bin/python course_opener.py          # macOS, Linux
+```
+
+```powershell
+.venv\Scripts\python course_opener.py      # Windows
 ```
 
 | Opzione | Effetto |
@@ -66,6 +80,9 @@ FAD_USERNAME_03=...     # e così via, fino a FAD_USERNAME_10
 | `--port N` | porta di debug (default 9333) |
 
 ## Comandi da shell
+
+Solo macOS e Linux: `courseopener.zsh` è uno script zsh e usa `pkill`, che su Windows non
+esiste. Lì si richiama `course_opener.py` direttamente, con le opzioni della tabella sopra.
 
 `courseopener.zsh` definisce una funzione `courseopener` che evita di ricordare le opzioni a
 memoria, e sa gestire fino a dieci account in parallelo. Per installarla, una riga nel proprio
@@ -110,6 +127,9 @@ cercando il percorso del profilo, e quel confronto è per sottostringa: con `acc
   le carica, viene scaricato da Selenium Manager e resta in cache in `~/.cache/selenium`.
 - **Profilo**: `~/.courseopener/chrome-profile-cft`, **fuori** da questa cartella di proposito —
   contiene i cookie di sessione, e la cartella è pensata per essere condivisa.
+- **Chiusura del browser**: su macOS e Linux con `pkill -f` sul percorso del profilo, su Windows
+  con una query CIM su `Win32_Process` e `taskkill`. In entrambi i casi il confronto sulla riga
+  di comando è per sottostringa, da cui i profili numerati a due cifre.
 - **Sessione**: lo script prova a riagganciarsi al browser già aperto sulla porta di debug; se
   non è pilotabile (tipico dopo un crash) chiude solo quell'istanza e la rilancia.
 - **Finestra àncora**: la finestra con l'elenco corsi resta aperta per tutto il giro e viene
