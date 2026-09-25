@@ -90,6 +90,7 @@
     <h2>Motore</h2>
     <div class="riga-form" style="margin-bottom:10px">
       <span id="stato-motore" class="badge b-grigio">fermo</span>
+      <span id="badge-headless" class="badge b-viola" style="display:none">headless</span>
       <span>Corsi in simultanea: <strong id="slot-usati">0</strong> / <strong id="slot-max">0</strong></span>
       <span id="scan-info" class="muto"></span>
       <span style="flex:1"></span>
@@ -309,6 +310,7 @@ function renderizza(stato) {
   const badge = document.getElementById("stato-motore");
   badge.textContent = eng.running ? testoStato : (eng.status === "fermo" ? "fermo" : testoStato + " (thread spento)");
   badge.className = "badge " + clsStato;
+  document.getElementById("badge-headless").style.display = eng.headless ? "inline-block" : "none";
   document.getElementById("slot-usati").textContent = eng.windows;
   document.getElementById("slot-max").textContent = set.max_simultaneous;
   document.getElementById("slot-barra").style.width =

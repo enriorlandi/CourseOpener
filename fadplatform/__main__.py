@@ -25,10 +25,15 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1", help="interfaccia su cui servire la UI")
     parser.add_argument("--port", type=int, default=8788, help="porta della UI (default 8788)")
     parser.add_argument("--no-open", action="store_true", help="non aprire il browser sulla UI")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Chrome senza finestre: niente focus rubato al Mac, i video girano lo stesso",
+    )
     args = parser.parse_args()
 
     store = Store()
-    engine = Engine(store)
+    engine = Engine(store, headless=args.headless)
     app = create_app(store, engine)
     server = make_server(args.host, args.port, app, threaded=True)
 

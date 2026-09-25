@@ -149,6 +149,22 @@ def ensure_developer_mode(driver: webdriver.Chrome) -> None:
             driver.get(corrente)
 
 
+def password_prefs(data: dict) -> None:
+    """Spegni il gestore password, sul posto, dentro un dict di Preferences.
+
+    Niente bolla "salvare la password?" sui form di login del sito, niente
+    auto-accesso con credenziali memorizzate, niente avvisi di leak. Sono le
+    stesse chiavi che usa il toggle nelle impostazioni: forzarle qui vale
+    anche dove non arrivano le opzioni di Selenium (browser riagganciato), e
+    un eventuale true scritto da un giro precedente viene sovrascritto.
+    """
+    profilo = data.setdefault("profile", {})
+    profilo["password_manager_enabled"] = False
+    profilo["password_manager_leak_detection"] = False
+    data["credentials_enable_service"] = False
+    data["credentials_enable_autosignin"] = False
+
+
 def prepare_clean_start(profile_dir: Path) -> None:
     """Impedisce a Chrome di ripristinare le finestre del giro precedente.
 
@@ -156,13 +172,19 @@ def prepare_clean_start(profile_dir: Path) -> None:
     sessione, e le vecchie finestre si sommano alle nuove. I pref da soli non
     bastano: gli snapshot di sessione vanno anche rimossi. Sono solo elenchi di
     schede - cookie e login stanno altrove e restano intatti.
+
+    Su profilo nuovo il file Preferences non esiste ancora: lo crea, perche'
+    le preferenze del gestore password vanno dentro fin dal primo avvio.
     """
     default = profile_dir / "Default"
+    default.mkdir(parents=True, exist_ok=True)
     prefs = default / "Preferences"
     if prefs.is_file():
         try:
             data = json.loads(prefs.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict):
             data = {}
         profilo = data.setdefault("profile", {})
         profilo["exit_type"] = "Normal"
@@ -170,7 +192,10 @@ def prepare_clean_start(profile_dir: Path) -> None:
         # 5 = parti dalla pagina Nuova scheda, non dall'ultima sessione.
         data.setdefault("session", {})["restore_on_startup"] = 5
         data["session"]["startup_urls"] = []
-        prefs.write_text(json.dumps(data), encoding="utf-8")
+    else:
+        data = {}
+    password_prefs(data)
+    prefs.write_text(json.dumps(data), encoding="utf-8")
 
     for cartella in (default / "Sessions", default / "Session Storage"):
         if cartella.is_dir():
@@ -360,6 +385,7 @@ def build_driver(
     port: int = DEBUG_PORT,
     extension: Path | None = None,
     pinned: str = "",
+    headless: bool = False,
 ) -> tuple[webdriver.Chrome, bool]:
     """Lancia (o riaggancia) il Chrome dedicato a un profilo.
 
@@ -408,7 +434,20 @@ def build_driver(
     options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--profile-directory=Default")
     options.add_argument(f"--remote-debugging-port={port}")
-    options.add_argument("--start-maximized")
+    if headless:
+        # Senza finestre: il Mac resta libero e il focus non viene mai rubato
+        # dai continui cambi di finestra del listener. I video partono lo
+        # stesso (autoplay gia' autorizzato, l'estensione carica anche cosi')
+        # e il tracciamento del tempo di visione sta sulla piattaforma.
+        options.add_argument("--headless")
+        options.add_argument("--window-size=1920,1080")
+    else:
+        options.add_argument("--start-maximized")
+    # Portachiavi finto: senza, ogni profilo che tocca password puo' far
+    # comparire il prompt di accesso al Portachiavi di sistema, e le password
+    # di test finirebbero nel portachiavi vero dell'utente. Ignorato altrove.
+    if sys.platform == "darwin":
+        options.add_argument("--use-mock-keychain")
     options.add_experimental_option("detach", True)  # la finestra resta aperta a fine script
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     if extension:

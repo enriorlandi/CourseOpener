@@ -15,7 +15,10 @@ Si avvia con:
 .venv/bin/python -m fadplatform
 ```
 
-e apre la UI su http://127.0.0.1:8788 (solo locale). Da lì si fa tutto:
+e apre la UI su http://127.0.0.1:8788 (solo locale). Con `--headless` (o da shell
+`courseui run --headless`) Chrome gira senza finestre: il Mac resta utilizzabile —
+niente focus rubato dai continui cambi di finestra del listener — e tutto si
+monitora dalla UI. Da lì si fa tutto:
 
 - **Utenti di test**: aggiunti a mano (username + password, nessun controllo su
   lunghezza o caratteri: sono credenziali di collaudo) o importati da un **CSV a due

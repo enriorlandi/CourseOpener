@@ -127,9 +127,16 @@ class UserSession(threading.Thread):
         # questo profilo farebbe scattare il ProcessSingleton al lancio.
         moodle.close_dedicated_chrome(self.profile, timeout=8)
         self.driver, _ = moodle.build_driver(
-            self.profile, self.port, estensione, self.settings.get("pinned_chrome", "")
+            self.profile,
+            self.port,
+            estensione,
+            self.settings.get("pinned_chrome", ""),
+            self.engine.headless,
         )
-        moodle.ensure_developer_mode(self.driver)
+        # L'interruttore serve a ricaricare l'estensione a mano dalla pagina
+        # chrome://extensions: senza finestre non c'e' mano da usare.
+        if not self.engine.headless:
+            moodle.ensure_developer_mode(self.driver)
         self.driver.get(moodle.COURSES_URL)
         moodle.ensure_logged_in(
             self.driver, moodle.COURSES_URL, (self.username, self.password), allow_manual=False
@@ -459,8 +466,9 @@ class UserSession(threading.Thread):
 class Engine:
     """Scansiona gli utenti, riempie gli slot, consuma i report delle sessioni."""
 
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, headless: bool = False):
         self.store = store
+        self.headless = headless
         self.reports: queue.Queue = queue.Queue()
         self.control: queue.Queue = queue.Queue()
         self.lock = threading.RLock()
@@ -630,10 +638,14 @@ class Engine:
             profile.mkdir(parents=True, exist_ok=True)
             moodle.close_dedicated_chrome(profile, timeout=8)
             driver, _ = moodle.build_driver(
-                profile, port, moodle.DEFAULT_EXTENSION,
+                profile,
+                port,
+                moodle.DEFAULT_EXTENSION,
                 self.store.settings().get("pinned_chrome", ""),
+                self.headless,
             )
-            moodle.ensure_developer_mode(driver)
+            if not self.headless:
+                moodle.ensure_developer_mode(driver)
             driver.get(moodle.COURSES_URL)
             moodle.ensure_logged_in(
                 driver, moodle.COURSES_URL, (nome, user["password"]), allow_manual=False
@@ -933,6 +945,7 @@ class Engine:
             return {
                 "running": self.is_running(),
                 "status": self.status,
+                "headless": self.headless,
                 "windows": self._running_count(),
                 "scan": {"user": self.scan_now[0], "done": self.scan_now[1], "total": self.scan_now[2]}
                 if self.scan_now
