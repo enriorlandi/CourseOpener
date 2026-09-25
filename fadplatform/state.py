@@ -69,7 +69,7 @@ def profile_slug(username: str) -> str:
 
 
 def new_state() -> dict:
-    return {"settings": dict(DEFAULT_SETTINGS), "users": []}
+    return {"settings": dict(DEFAULT_SETTINGS), "users": [], "categories": []}
 
 
 class Store:
@@ -94,7 +94,8 @@ class Store:
         settings = dict(DEFAULT_SETTINGS)
         settings.update(data.get("settings") or {})
         users = [u for u in (data.get("users") or []) if isinstance(u, dict) and u.get("username")]
-        return {"settings": settings, "users": users}
+        categorie = [c for c in (data.get("categories") or []) if isinstance(c, str) and c.strip()]
+        return {"settings": settings, "users": users, "categories": categorie}
 
     def save(self) -> None:
         with self.lock:
@@ -132,13 +133,15 @@ class Store:
                     return u
             return None
 
-    def upsert_user(self, username: str, password: str, name: str | None = None) -> tuple[dict, bool]:
-        """Aggiunge l'utente o, se esiste, gli aggiorna password e nome.
+    def upsert_user(
+        self, username: str, password: str, name: str | None = None, category: str | None = None
+    ) -> tuple[dict, bool]:
+        """Aggiunge l'utente o, se esiste, gli aggiorna i dati di collaudo.
 
         Nessun controllo su lunghezza o caratteri: sono credenziali di test.
-        Ritorna (utente, creato_adesso). La password nuova invalida un'eventuale
-        errore di login precedente, ma non i corsi gia' scoperti. ``name`` e'
-        facoltativo e serve solo da etichetta nella UI: None lo lascia com'e'.
+        Ritorna (utente, creato_adesso). ``name`` e ``category`` a None
+        significano "non toccare"; la categoria assegnata viene registrata
+        nell'elenco delle categorie conosciute.
         """
         username = (username or "").strip()
         password = password or ""
@@ -150,12 +153,16 @@ class Store:
                         u["login_error"] = None
                     if name is not None:
                         u["name"] = name
+                    if category is not None:
+                        self._register_category_locked(category)
+                        u["category"] = category
                     self.save()
                     return u, False
             u = {
                 "username": username,
                 "password": password,
                 "name": name or "",
+                "category": category or "",
                 "slug": profile_slug(username),
                 "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "last_scan": None,
@@ -163,6 +170,8 @@ class Store:
                 "courses": [],
             }
             self.data["users"].append(u)
+            if category:
+                self._register_category_locked(category)
             self.save()
             return u, True
 
@@ -195,6 +204,54 @@ class Store:
                 self.save()
                 return u
             return None
+
+    # ----------------------------------------------------------- categorie
+
+    def _register_category_locked(self, name: str) -> None:
+        """Registra una categoria nell'elenco (chiamare sotto lock)."""
+        name = (name or "").strip()
+        if name and name not in self.data["categories"]:
+            self.data["categories"].append(name)
+
+    def categories(self) -> list[str]:
+        with self.lock:
+            return list(self.data["categories"])
+
+    def add_category(self, name: str) -> bool:
+        """Crea una categoria; False se il nome e' vuoto o gia' presente."""
+        name = (name or "").strip()
+        with self.lock:
+            if not name or name in self.data["categories"]:
+                return False
+            self.data["categories"].append(name)
+            self.save()
+            return True
+
+    def remove_category(self, name: str) -> int:
+        """Elimina la categoria e la toglie agli utenti; ritorna i toccati."""
+        with self.lock:
+            if name not in self.data["categories"]:
+                return -1
+            self.data["categories"].remove(name)
+            tocatti = 0
+            for u in self.data["users"]:
+                if u.get("category") == name:
+                    u["category"] = ""
+                    tocatti += 1
+            self.save()
+            return tocatti
+
+    def set_user_category(self, username: str, category: str) -> bool:
+        """Assegna (o con "" toglie) la categoria a un utente."""
+        category = (category or "").strip()
+        with self.lock:
+            for u in self.data["users"]:
+                if u["username"] == username:
+                    self._register_category_locked(category)
+                    u["category"] = category
+                    self.save()
+                    return True
+            return False
 
     def remove_user(self, username: str) -> bool:
         with self.lock:

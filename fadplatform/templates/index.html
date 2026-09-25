@@ -34,6 +34,19 @@
   .ellisse { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
   .nome-cell { max-width: 260px; }
   .titolo-corso { max-width: 560px; }
+  /* Colonna "Da testare": verde a zero, giallo sotto la meta' dei corsi,
+     rosso da meta' in su. */
+  .da-test { font-weight: 700; }
+  .da-test.verde { color: var(--verde); }
+  .da-test.giallo { color: var(--ambra); }
+  .da-test.rosso { color: var(--rosso); }
+  .chip-cat { display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--bordo); border-radius: 999px; padding: 2px 6px 2px 11px;
+    background: #fff; }
+  .chip-cat em { color: var(--muto); font-style: normal; font-size: 11.5px; }
+  .chip-cat button { border: none; background: none; cursor: pointer;
+    color: var(--muto); padding: 0 3px; font-size: 12px; }
+  .chip-cat button:hover { color: var(--rosso); }
   .barra-slot { height: 8px; background: #e8eaed; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; }
   .barra-slot > div { height: 100%; background: var(--blu); }
   input, button, select {
@@ -153,9 +166,14 @@
         <button id="btn-importa-testo" style="margin-top:6px">Importa testo</button>
       </details>
     </div>
+    <div class="riga-form" id="riga-categorie" style="display:none; margin-bottom:10px">
+      <span class="muto">Categorie:</span>
+      <span id="lista-chip"></span>
+    </div>
     <table>
       <thead>
-        <tr><th><input type="checkbox" id="sel-tutti" title="Seleziona tutti"></th><th>Utente</th><th>Nome</th><th title="Password">Pass</th><th>Corsi</th>
+        <tr><th><input type="checkbox" id="sel-tutti" title="Seleziona tutti"></th><th>Utente</th><th>Nome</th>
+            <th title="Categoria">Cat.</th><th title="Password">Pass</th><th>Corsi</th>
             <th title="Da testare">Da test</th><th title="Completati">Compl.</th>
             <th title="Fermi ai test">Ai test</th><th title="Progresso medio">Media</th>
             <th>Stato</th><th></th></tr>
@@ -168,6 +186,10 @@
       <button id="btn-bulk-avvia" class="piccolo primario">Avvia test solo su questi</button>
       <button id="btn-bulk-rescan" class="piccolo">Riscansiona</button>
       <button id="btn-bulk-rimuovi" class="piccolo pericolo">Rimuovi</button>
+      <input id="bulk-cat" list="lista-cat" placeholder="categoria (vuota = toglie)"
+             style="width:190px" title="Assegnare i selezionati a questa categoria">
+      <datalist id="lista-cat"></datalist>
+      <button id="btn-bulk-cat" class="piccolo">Assegna categoria</button>
       <span style="flex:1"></span>
       <button id="btn-bulk-nulla" class="piccolo">Annulla selezione</button>
     </div>
@@ -310,6 +332,11 @@ function cellaVideo(corso) {
   return `<span class="mono">${stato} ${pos}${dur ? " / " + dur : ""}</span>`;
 }
 
+function classeDaTest(toTest, total) {
+  if (toTest === 0) return "verde";
+  return toTest * 2 < total ? "giallo" : "rosso";
+}
+
 function rigaUtente(u) {
   const t = u.totals;
   let stato;
@@ -321,9 +348,10 @@ function rigaUtente(u) {
     <td><input type="checkbox" class="sel-utente" data-u="${esc(u.username)}"></td>
     <td class="ellisse"><strong title="${esc(u.username)}">${esc(u.username)}</strong></td>
     <td class="ellisse nome-cell" title="${esc(u.name || "")}">${esc(u.name || "")}</td>
+    <td class="ellisse" style="max-width:140px" title="${esc(u.category || "")}">${esc(u.category || "")}</td>
     <td class="mono">${esc(u.password)}</td>
     <td>${t.total}</td>
-    <td>${t.to_test}</td>
+    <td class="da-test ${classeDaTest(t.to_test, t.total)}">${t.to_test}</td>
     <td>${t.completed}</td>
     <td>${t.ai_test}</td>
     <td><span class="perc">${t.avg_progress}%</span></td>
@@ -376,7 +404,7 @@ function bloccoCorsiUtente(u) {
     <summary>
       <strong>${esc(u.username)}</strong>${u.name ? ` <span class="muto">${esc(u.name)}</span>` : ""}
       <span class="badge b-grigio">${t.total} corsi</span>
-      ${t.to_test ? `<span class="badge b-ambra">${t.to_test} da testare</span>` : ""}
+      ${t.to_test ? `<span class="badge ${classeDaTest(t.to_test, t.total) === "rosso" ? "b-rosso" : "b-ambra"}">${t.to_test} da testare</span>` : `<span class="badge b-verde">0 da testare</span>`}
       <span class="badge b-verde">${t.completed} completati</span>
       <span class="badge b-viola">${t.ai_test} ai test</span>
       <span class="badge b-blu">${t.running} attivi</span>
@@ -441,6 +469,17 @@ function renderizza(stato) {
   document.getElementById("lista-eventi").innerHTML = eventi.map((e) =>
     `<li><span class="ora">${esc(e.ts)}</span>${e.user ? `<span class="utente">${esc(e.user)}</span>` : ""}${esc(e.msg)}</li>`
   ).join("") || '<li class="muto">Nessuna attività registrata.</li>';
+
+  // categorie: chip con conteggio e suggerimenti per l'assegnazione bulk
+  const categorie = stato.categories || [];
+  const perCat = {};
+  for (const u of stato.users) if (u.category) perCat[u.category] = (perCat[u.category] || 0) + 1;
+  document.getElementById("riga-categorie").style.display = categorie.length ? "flex" : "none";
+  document.getElementById("lista-chip").innerHTML = categorie.map((c) =>
+    `<span class="chip-cat" data-cat="${esc(c)}">${esc(c)} <em>${perCat[c] || 0}</em>` +
+    `<button data-cat-rimuovi="${esc(c)}" title="Elimina la categoria (tolta agli utenti assegnati)">✕</button></span>`
+  ).join(" ");
+  document.getElementById("lista-cat").innerHTML = categorie.map((c) => `<option value="${esc(c)}">`).join("");
 
   syncSelezione(stato);
 }
@@ -602,6 +641,33 @@ document.getElementById("btn-bulk-rimuovi").addEventListener("click", async () =
     const dati = await post("/api/users/bulk", { action: "remove", usernames: [...selezionati] });
     selezionati.clear();
     mostraErrore(`Rimossi ${dati.removed} utenti.`);
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
+document.getElementById("btn-bulk-cat").addEventListener("click", async () => {
+  if (!selezionati.size) return;
+  const cat = document.getElementById("bulk-cat").value.trim();
+  try {
+    const dati = await post("/api/users/bulk", { action: "assign", usernames: [...selezionati], category: cat });
+    mostraErrore(cat
+      ? `Categoria "${cat}" assegnata a ${dati.assigned} utenti.`
+      : `Categoria tolta a ${dati.assigned} utenti.`);
+    document.getElementById("bulk-cat").value = "";
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
+document.getElementById("lista-chip").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-cat-rimuovi]");
+  if (!btn) return;
+  const nome = btn.dataset.catRimuovi;
+  if (!confirm(`Eliminare la categoria "${nome}"? Verra' tolta agli utenti assegnati.`)) return;
+  try {
+    const r = await fetch(`/api/categories/${encodeURIComponent(nome)}`, { method: "DELETE" });
+    const dati = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(dati.error || r.statusText);
+    mostraErrore(`Categoria eliminata, tolta a ${dati.cleared_users} utenti.`);
   } catch (e) { mostraErrore(e.message); }
   aggiorna();
 });

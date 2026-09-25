@@ -23,13 +23,13 @@ HEADER_UTENTE = {"username", "user", "utente", "nome", "account", "login", "emai
 HEADER_PASSWORD = {"password", "pass", "pwd", "pw", "psw"}
 
 
-def parse_users_csv(text: str) -> list[tuple[str, str, str]]:
-    """Estrae (username, password, nome) da un CSV a due o tre colonne.
+def parse_users_csv(text: str) -> list[tuple[str, str, str, str]]:
+    """Estrae (username, password, nome, categoria) da un CSV a 2-4 colonne.
 
     Accetta virgola, punto e virgola o tabulazione come separatore e salta
-    l'eventuale riga d'intestazione. La terza colonna, il nome, e' facoltativa:
-    e' un'etichetta per la UI, non un dato per la piattaforma. Le password sono
-    di test: nessun controllo di lunghezza o caratteri, come da requisiti.
+    l'eventuale riga d'intestazione. Nome e categoria sono facoltativi:
+    etichette per chi guarda la UI, non dati per la piattaforma. Le password
+    sono di test: nessun controllo di lunghezza o caratteri, come da requisiti.
     """
     righe = [r for r in text.splitlines() if r.strip()]
     if not righe:
@@ -38,18 +38,16 @@ def parse_users_csv(text: str) -> list[tuple[str, str, str]]:
     # la virgola). "delimiter" di csv.reader vuole un carattere solo.
     separatore = max(",;\t", key=righe[0].count)
     lette = list(csv.reader(io.StringIO(text), delimiter=separatore))
-    utenti: list[tuple[str, str, str]] = []
+    utenti: list[tuple[str, str, str, str]] = []
     for i, riga in enumerate(lette):
         if not riga or not any(campo.strip() for campo in riga):
             continue
-        col0 = (riga[0] if riga else "").strip()
-        col1 = (riga[1] if len(riga) > 1 else "").strip()
-        col2 = (riga[2] if len(riga) > 2 else "").strip()
-        if i == 0 and col0.lower() in HEADER_UTENTE and col1.lower() in HEADER_PASSWORD:
+        campi = [(riga[j] if len(riga) > j else "").strip() for j in range(4)]
+        if i == 0 and campi[0].lower() in HEADER_UTENTE and campi[1].lower() in HEADER_PASSWORD:
             continue  # intestazione
-        if not col0:
+        if not campi[0]:
             continue
-        utenti.append((col0, col1, col2))
+        utenti.append((campi[0], campi[1], campi[2], campi[3]))
     return utenti
 
 
@@ -81,6 +79,7 @@ def create_app(store: Store, engine: Engine) -> Flask:
                 {
                     "username": u["username"],
                     "name": u.get("name") or "",
+                    "category": u.get("category") or "",
                     "password": u["password"],
                     "slug": u["slug"],
                     "last_scan": u.get("last_scan"),
@@ -95,6 +94,7 @@ def create_app(store: Store, engine: Engine) -> Flask:
                 "version": __version__,
                 "engine": quadro,
                 "settings": store.settings(),
+                "categories": store.categories(),
                 "users": utenti,
             }
         )
@@ -108,7 +108,10 @@ def create_app(store: Store, engine: Engine) -> Flask:
         if not username:
             return jsonify({"error": "username obbligatorio"}), 400
         _, creato = store.upsert_user(
-            username, corpo.get("password") or "", (corpo.get("name") or "").strip()
+            username,
+            corpo.get("password") or "",
+            (corpo.get("name") or "").strip(),
+            (corpo.get("category") or "").strip() or None,
         )
         return jsonify({"created": creato})
 
@@ -134,12 +137,13 @@ def create_app(store: Store, engine: Engine) -> Flask:
     @app.get("/api/users/export")
     def api_export_users():
         """I utenti in CSV, nello stesso formato che l'import si aspetta:
-        username,password,nome (il nome puo' restare vuoto)."""
+        username,password,nome,categoria (nome e categoria possono restare
+        vuoti)."""
         buffer = io.StringIO()
         scrittore = csv.writer(buffer)
-        scrittore.writerow(["username", "password", "name"])
+        scrittore.writerow(["username", "password", "name", "category"])
         for u in store.users():
-            scrittore.writerow([u["username"], u["password"], u.get("name") or ""])
+            scrittore.writerow([u["username"], u["password"], u.get("name") or "", u.get("category") or ""])
         risposta = Response(buffer.getvalue(), mimetype="text/csv; charset=utf-8")
         risposta.headers["Content-Disposition"] = 'attachment; filename="utenti-fad.csv"'
         return risposta
@@ -170,8 +174,8 @@ def create_app(store: Store, engine: Engine) -> Flask:
         if not utenti:
             return jsonify({"error": "nessuna riga valida (servono due colonne: username,password)"}), 400
         aggiunti = aggiornati = 0
-        for username, password, name in utenti:
-            _, creato = store.upsert_user(username, password, name)
+        for username, password, name, category in utenti:
+            _, creato = store.upsert_user(username, password, name, category)
             aggiunti += int(creato)
             aggiornati += int(not creato)
         return jsonify({"added": aggiunti, "updated": aggiornati, "total": len(utenti)})
@@ -181,12 +185,33 @@ def create_app(store: Store, engine: Engine) -> Flask:
         corpo = request.get_json(silent=True) or {}
         azione = corpo.get("action")
         nomi = [n for n in (corpo.get("usernames") or []) if isinstance(n, str) and store.get_user(n)]
-        if azione not in ("remove", "rescan") or not nomi:
-            return jsonify({"error": "servono action ('remove' o 'rescan') e almeno un utente esistente"}), 400
+        if not nomi or azione not in ("remove", "rescan", "assign"):
+            return jsonify({"error": "servono action ('remove', 'rescan' o 'assign') e almeno un utente esistente"}), 400
         if azione == "remove":
             rimossi = sum(1 for n in nomi if engine.drop_user(n))
             return jsonify({"removed": rimossi})
+        if azione == "assign":
+            categoria = (corpo.get("category") or "").strip()
+            assegnati = sum(1 for n in nomi if store.set_user_category(n, categoria))
+            return jsonify({"assigned": assegnati, "category": categoria})
         return jsonify({"queued": engine.rescan_many(nomi)})
+
+    # ---------------------------------------------------------- categorie
+
+    @app.post("/api/categories")
+    def api_add_category():
+        nome = (request.get_json(silent=True) or {}).get("name") or ""
+        creato = store.add_category(nome)
+        if not creato:
+            return jsonify({"error": "nome vuoto o gia' esistente"}), 409
+        return jsonify({"created": True})
+
+    @app.delete("/api/categories/<nome>")
+    def api_remove_category(nome: str):
+        toccati = store.remove_category(nome)
+        if toccati < 0:
+            return jsonify({"error": "categoria inesistente"}), 404
+        return jsonify({"removed": True, "cleared_users": toccati})
 
     @app.post("/api/users/<username>/rescan")
     def api_rescan_user(username: str):
