@@ -325,12 +325,15 @@ class Store:
                 contati += 1
                 somma += c.get("progress") or 0
         completati = per_stato.get(STATUS_COMPLETED, 0)
+        fermi = per_stato.get(STATUS_AI_TEST, 0)
         return {
             "total": totale,
             "counted": contati,
-            # Quanto manca all'obiettivo del 100%: tutto cio' che non e'
-            # completato (in coda, in riproduzione, fermo ai test, in errore).
-            "to_test": totale - completati - per_stato.get(STATUS_NO_ACTIVITY, 0),
+            # Quanto manca all'obiettivo: i corsi su cui il rig puo' ancora
+            # lavorare (in coda, in riproduzione, in errore). Quelli fermi ai
+            # test da qui non passano mai - i quiz non si fanno - quindi non
+            # contano come lavoro rimasto, ne' quelli senza attivita'.
+            "to_test": totale - completati - fermi - per_stato.get(STATUS_NO_ACTIVITY, 0),
             "completed": completati,
             "ai_test": per_stato.get(STATUS_AI_TEST, 0),
             "pending": per_stato.get(STATUS_PENDING, 0),
