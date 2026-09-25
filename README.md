@@ -1,7 +1,58 @@
 # CourseOpener
 
+Due strumenti per collaudare la piattaforma [FAD ForMe](https://fad-for-me.formretail.it):
+
+- **`python -m fadplatform`** — il rig di test completo: UI web, più utenti di test,
+  N corsi in simultanea, listener anti-blocco, chiusura automatica sui test.
+- **`course_opener.py`** — lo script storico: apre una finestra per ogni corso il cui
+  prossimo passo è un video. Comodo per un giro veloce su un account.
+
+## Il rig di test (`fadplatform`)
+
+Si avvia con:
+
+```bash
+.venv/bin/python -m fadplatform
+```
+
+e apre la UI su http://127.0.0.1:8788 (solo locale). Da lì si fa tutto:
+
+- **Utenti di test**: aggiunti a mano (username + password, nessun controllo su
+  lunghezza o caratteri: sono credenziali di collaudo) o importati da un **CSV a due
+  colonne** (`username,password`; accetta anche `;` o tabulazione come separatore, e
+  salta l'eventuale riga d'intestazione).
+- **Corsi in simultanea**: quanti corsi tenere aperti in totale, modificabile anche
+  a motore acceso (0 = sola scansione).
+- **Avvio**: il rig parte dal primo utente della lista e va in ordine. Prima scansiona
+  i corsi di ogni utente (titoli, stati, percentuali), poi apre finestre finché lo
+  slot lo consente. Quando un corso finisce, lo slot passa al prossimo della coda —
+  dello stesso utente riusando la finestra, di un altro utente aprendo un'istanza
+  Chrome separata con profilo e porta propri (login incluso).
+- **Obiettivo**: portare tutti i corsi di tutti gli utenti al 100%. Quando un corso
+  arriva alla parte di test (risposta multipla), la finestra si chiude e il corso
+  resta marcato "fermo ai test": i test non vengono mai compilati.
+- **Memoria**: tutto lo stato vive in `~/.courseopener/state.json` — chiuso il
+  software e riaperto, utenti, progressi e coda riprendono da dove erano. Il file
+  contiene le password di test ed è a permessi 600.
+
+Il **listener anti-blocco** controlla ogni finestra e fa un refresh della pagina in
+tre casi: il video è in pausa da un po', è in riproduzione ma il tempo non scorre,
+oppure è finito e non è passato al successivo. Dopo troppi refresh a vuoto il rig
+rilegge l'indice del corso e decide se chiudere la finestra. Dalla UI si vede lo
+stato del video di ogni finestra (posizione, durata, pausa/finito).
+
+La **versione di Chrome for Testing è fissata** (impostazione "Versione Chrome for
+Testing" nella UI, default `153.0.8010.52`, quella già in cache): niente download a
+ogni avvio. Se la svuoti o ne metti un'altra, il rig la scarica una volta sola.
+Lasciando il campo vuoto torna il comportamento automatico (la più alta in cache).
+
+Ogni utente ha il suo profilo in `~/.courseopener/profiles/<slug>`: sessioni
+indipendenti, più utenti insieme senza pestarsi i piedi.
+
+## Lo script storico (`course_opener.py`)
+
 Apre una finestra di Chrome per ogni corso della propria pagina
-[I miei corsi](https://fad-for-me.formretail.it/my/courses.php) sulla piattaforma FAD ForMe,
+[I miei corsi](https://fad-for-me.formretail.it/my/courses.php),
 tenendo aperte solo quelle in cui la prossima cosa da fare è un video.
 
 Per ogni corso lo script guarda l'indice laterale, trova la **prima attività non completata**
@@ -24,9 +75,7 @@ video da sola.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-```
-
-Poi le credenziali della piattaforma nel file `.env`:
+```Poi le credenziali della piattaforma nel file `.env`:
 
 ```
 FAD_USERNAME=...

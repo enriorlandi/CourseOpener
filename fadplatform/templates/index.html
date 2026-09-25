@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rig di test — FAD ForMe</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%230b62d6'/%3E%3Cpath d='M6 4.5v7l5.5-3.5z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f4f5f7; --carta: #fff; --bordo: #dde1e6; --testo: #1f2328;
+    --muto: #6b7280; --blu: #0b62d6; --verde: #1a7f37; --rosso: #cf222e;
+    --ambra: #9a6700; --viola: #8250df;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--testo);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .contenitore { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .sottotitolo { color: var(--muto); margin: 0 0 18px; font-size: 12.5px; }
+  .carta {
+    background: var(--carta); border: 1px solid var(--bordo); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .carta > h2 { font-size: 15px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bordo); vertical-align: top; }
+  th { color: var(--muto); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  tr:last-child td { border-bottom: none; }
+  .barra-slot { height: 8px; background: #e8eaed; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; }
+  .barra-slot > div { height: 100%; background: var(--blu); }
+  input, button, select {
+    font: inherit; padding: 6px 10px; border: 1px solid var(--bordo);
+    border-radius: 7px; background: #fff; color: var(--testo);
+  }
+  input[type=number] { width: 90px; }
+  input[type=text] { width: 100%; }
+  button { cursor: pointer; }
+  button.primario { background: var(--blu); border-color: var(--blu); color: #fff; }
+  button.pericolo { color: var(--rosso); border-color: #ffc8c2; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.piccolo { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+  .badge {
+    display: inline-block; padding: 1px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
+  .b-verde { background: #dafbe1; color: var(--verde); }
+  .b-blu   { background: #ddf4ff; color: #0969da; }
+  .b-grigio{ background: #eaeef2; color: var(--muto); }
+  .b-rosso { background: #ffebe9; color: var(--rosso); }
+  .b-ambra { background: #fff8c5; color: var(--ambra); }
+  .b-viola { background: #f0e7ff; color: var(--viola); }
+  .riga-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .riga-form input { flex: 0 0 auto; }
+  .muto { color: var(--muto); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  details.utente { border: 1px solid var(--bordo); border-radius: 8px; margin-bottom: 8px; background: #fbfcfd; }
+  details.utente > summary {
+    cursor: pointer; padding: 9px 12px; list-style: none; display: flex;
+    flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  details.utente > summary::-webkit-details-marker { display: none; }
+  details.utente > summary::before { content: "▸"; color: var(--muto); }
+  details.utente[open] > summary::before { content: "▾"; }
+  details.utente > .interno { padding: 0 12px 10px; }
+  .perc { display: inline-block; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+  .mini-barra { display: inline-block; width: 110px; height: 6px; background: #e8eaed; border-radius: 3px; vertical-align: middle; }
+  .mini-barra > div { height: 100%; background: var(--verde); border-radius: 3px; }
+  ul.eventi { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; font-size: 12.5px; }
+  ul.eventi li { padding: 3px 0; border-bottom: 1px dashed var(--bordo); }
+  ul.eventi li .ora { color: var(--muto); margin-right: 6px; font-variant-numeric: tabular-nums; }
+  ul.eventi li .utente { font-weight: 600; margin-right: 6px; }
+  .azioni-cella button { margin: 1px 0; }
+  .errore-banner { background: #ffebe9; border: 1px solid #ffc8c2; color: var(--rosso);
+    border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; display: none; }
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid #c8cdd3;
+    border-top-color: var(--blu); border-radius: 50%; animation: giro 0.9s linear infinite; vertical-align: -1px; }
+  @keyframes giro { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="contenitore">
+  <h1>Rig di test — FAD ForMe</h1>
+  <p class="sottotitolo">Finestre di collaudio con autoplay, listener anti-blocco e chiusura automatica sui test · v{{ version }}</p>
+
+  <div id="errore" class="errore-banner"></div>
+
+  <div class="carta">
+    <h2>Motore</h2>
+    <div class="riga-form" style="margin-bottom:10px">
+      <span id="stato-motore" class="badge b-grigio">fermo</span>
+      <span>Corsi in simultanea: <strong id="slot-usati">0</strong> / <strong id="slot-max">0</strong></span>
+      <span id="scan-info" class="muto"></span>
+      <span style="flex:1"></span>
+      <button id="btn-avvia" class="primario">Avvia</button>
+      <button id="btn-ferma" class="pericolo" disabled>Ferma</button>
+    </div>
+    <div class="barra-slot"><div id="slot-barra" style="width:0%"></div></div>
+    <div class="riga-form" style="margin-top:12px">
+      <label for="inp-max">Max corsi in simultanea</label>
+      <input id="inp-max" type="number" min="0" max="500" value="8">
+      <label for="inp-chrome">Versione Chrome for Testing fissata</label>
+      <input id="inp-chrome" type="text" placeholder="es. 153.0.8010.52 (vuota = automatica)" style="width:240px">
+      <button id="btn-salva-set">Salva impostazioni</button>
+      <span class="muto">0 = solo scansione, nessuna finestra</span>
+    </div>
+  </div>
+
+  <div class="carta">
+    <h2>Utenti di test</h2>
+    <div class="riga-form" style="margin-bottom:12px">
+      <input id="inp-utente" type="text" placeholder="username" style="width:190px">
+      <input id="inp-password" type="text" placeholder="password" style="width:130px">
+      <button id="btn-aggiungi">Aggiungi</button>
+      <span style="flex:1"></span>
+      <input type="file" id="inp-csv" accept=".csv,text/csv">
+      <button id="btn-importa">Importa CSV</button>
+    </div>
+    <div class="riga-form" style="margin-bottom:12px">
+      <details style="flex:1">
+        <summary class="muto" style="cursor:pointer">oppure incolla il CSV (due colonne: username,password)</summary>
+        <textarea id="ta-csv" rows="4" style="width:100%;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px" placeholder="MarioRossi,1234&#10;MarcoBianchi,1234"></textarea>
+        <button id="btn-importa-testo" style="margin-top:6px">Importa testo</button>
+      </details>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Utente</th><th>Password</th><th>Corsi</th><th>Completati</th><th>Fermi ai test</th>
+            <th>Progresso medio</th><th>Stato</th><th>Azioni</th></tr>
+      </thead>
+      <tbody id="tabella-utenti"></tbody>
+    </table>
+    <p class="muto" id="nessun-utente" style="display:none">Nessun utente: aggiungine uno o importa un CSV.</p>
+  </div>
+
+  <div class="carta">
+    <h2>Corsi per utente</h2>
+    <div id="lista-corsi"></div>
+    <p class="muto" id="nessun-corso" style="display:none">Ancora nessun corso: servono utenti e una scansione.</p>
+  </div>
+
+  <div class="carta">
+    <h2>Attività recente</h2>
+    <ul class="eventi" id="lista-eventi"></ul>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const STATO_BADGE = {
+  pending: ["in coda", "b-grigio"],
+  running: ["in riproduzione", "b-blu"],
+  completed: ["completato", "b-verde"],
+  ai_test: ["fermo ai test", "b-viola"],
+  error: ["errore", "b-rosso"],
+  no_activity: ["senza attività", "b-ambra"],
+};
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function fmtDurata(sec) {
+  if (!isFinite(sec) || sec <= 0) return "";
+  sec = Math.floor(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(2, "0"), ss = String(s).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+function mostraErrore(msg) {
+  const el = document.getElementById("errore");
+  if (!msg) { el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.style.display = "block";
+  setTimeout(() => { if (el.textContent === msg) el.style.display = "none"; }, 6000);
+}
+
+/* Il server puo' essere fermato (courseui stop, riavvio della macchina) con
+   questa pagina ancora aperta: ogni poll fallira' per sempre. Un fallimento
+   isolato invece e' un blip e non deve far lampeggiare niente. Dopo tre
+   fallimenti di fila il banner diventa persistente e dice come ripartire. */
+const SOGLIA_FALLIMENTI = 3;
+let falliteDiFila = 0;
+let ultimoContatto = null;
+const TITOLO = document.title;
+
+function mostraServerFermo(dettaglio) {
+  const el = document.getElementById("errore");
+  const quando = ultimoContatto
+    ? "ultimo contatto alle " + ultimoContatto.toLocaleTimeString("it-IT")
+    : "mai sentito da quando la pagina e' aperta";
+  el.textContent =
+    `Server fermo (${quando}). Se l'hai fermato tu, riavvialo con:  courseui run` +
+    (dettaglio ? `  —  ${dettaglio}` : "");
+  el.style.display = "block";
+  document.title = "⚠ " + TITOLO;
+}
+
+function nascondiServerFermo() {
+  document.getElementById("errore").style.display = "none";
+  document.title = TITOLO;
+}
+
+async function post(url, corpo) {
+  const opzioni = corpo === undefined ? { method: "POST" } :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) };
+  const r = await fetch(url, opzioni);
+  const dati = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(dati.error || r.statusText);
+  return dati;
+}
+
+/* ------------------------------------------------------------- rendering */
+
+function badgeStato(stato) {
+  const [etichetta, cls] = STATO_BADGE[stato] || [stato, "b-grigio"];
+  return `<span class="badge ${cls}">${esc(etichetta)}</span>`;
+}
+
+function cellaVideo(corso) {
+  const v = corso.video;
+  if (corso.status !== "running") return "";
+  if (!v) return `<span class="muto"><span class="spinner"></span></span>`;
+  if (v.missing) return `<span class="muto">player non letto</span>`;
+  const pos = fmtDurata(v.current) || "0:00";
+  const dur = fmtDurata(v.duration);
+  const stato = v.ended ? "finito" : v.paused ? "in pausa" : "▶";
+  return `<span class="mono">${stato} ${pos}${dur ? " / " + dur : ""}</span>`;
+}
+
+function rigaUtente(u) {
+  const t = u.totals;
+  let stato;
+  if (u.login_error) stato = `<span class="badge b-rosso">login errata</span>`;
+  else if (!u.last_scan) stato = `<span class="badge b-grigio">da scansionare</span>`;
+  else if (u.browser) stato = `<span class="badge b-verde">browser attivo</span>`;
+  else stato = `<span class="badge b-grigio">scansionato</span>`;
+  const dettaglio = u.login_error
+    ? `<div class="muto" style="font-size:12px">${esc(u.login_error)}</div>` : "";
+  const azioni = [
+    `<button class="piccolo" data-azione="rescan" data-u="${esc(u.username)}">Riscansiona</button>`,
+    u.login_error ? `<button class="piccolo" data-azione="retry" data-u="${esc(u.username)}">Riprova login</button>` : "",
+    `<button class="piccolo pericolo" data-azione="rimuovi" data-u="${esc(u.username)}">Rimuovi</button>`,
+  ].join(" ");
+  return `<tr>
+    <td><strong>${esc(u.username)}</strong>${dettaglio}</td>
+    <td class="mono">${esc(u.password)}</td>
+    <td>${t.total}</td>
+    <td>${t.completed}</td>
+    <td>${t.ai_test}</td>
+    <td><span class="perc">${t.avg_progress}%</span></td>
+    <td>${stato}</td>
+    <td class="azioni-cella">${azioni}</td>
+  </tr>`;
+}
+
+function bloccoCorsiUtente(u) {
+  const t = u.totals;
+  const righe = u.courses.map((c) => {
+    const perc = c.status === "no_activity" ? "—" : `${c.progress}%`;
+    const barra = c.status === "no_activity" ? "" :
+      `<span class="mini-barra"><div style="width:${Math.min(100, c.progress)}%"></div></span>`;
+    const riapri = ["completed", "ai_test", "error", "no_activity"].includes(c.status)
+      ? `<button class="piccolo" data-azione="riapri" data-u="${esc(u.username)}" data-c="${esc(c.id)}">Rimetti in coda</button>`
+      : "";
+    return `<tr>
+      <td>${esc(c.title)}</td>
+      <td style="white-space:nowrap"><span class="perc">${perc}</span> ${barra}</td>
+      <td>${badgeStato(c.status)}</td>
+      <td>${cellaVideo(c)}</td>
+      <td class="muto">${esc(c.updated_at || "")}</td>
+      <td>${riapri}</td>
+    </tr>`;
+  }).join("");
+  return `<details class="utente"${u.courses.some((c) => c.status === "running") ? " open" : ""}>
+    <summary>
+      <strong>${esc(u.username)}</strong>
+      <span class="badge b-grigio">${t.total} corsi</span>
+      <span class="badge b-verde">${t.completed} completati</span>
+      <span class="badge b-viola">${t.ai_test} ai test</span>
+      <span class="badge b-blu">${t.running} attivi</span>
+      ${t.error ? `<span class="badge b-rosso">${t.error} errori</span>` : ""}
+      <span class="muto">media ${t.avg_progress}%</span>
+    </summary>
+    <div class="interno">
+      <table>
+        <thead><tr><th>Corso</th><th>Progresso</th><th>Stato</th><th>Video</th><th>Aggiornato</th><th></th></tr></thead>
+        <tbody>${righe}</tbody>
+      </table>
+    </div>
+  </details>`;
+}
+
+function renderizza(stato) {
+  const eng = stato.engine;
+  const set = stato.settings;
+
+  // motore
+  const etichette = {
+    fermo: ["fermo", "b-grigio"], avvio: ["avvio…", "b-ambra"], scansione: ["scansione…", "b-ambra"],
+    "in esecuzione": ["in esecuzione", "b-verde"], "in arresto": ["in arresto…", "b-ambra"],
+  };
+  const [testoStato, clsStato] = etichette[eng.status] || [eng.status, "b-grigio"];
+  const badge = document.getElementById("stato-motore");
+  badge.textContent = eng.running ? testoStato : (eng.status === "fermo" ? "fermo" : testoStato + " (thread spento)");
+  badge.className = "badge " + clsStato;
+  document.getElementById("slot-usati").textContent = eng.windows;
+  document.getElementById("slot-max").textContent = set.max_simultaneous;
+  document.getElementById("slot-barra").style.width =
+    (set.max_simultaneous ? Math.min(100, eng.windows * 100 / set.max_simultaneous) : 0) + "%";
+  document.getElementById("scan-info").innerHTML = eng.scan
+    ? `<span class="spinner"></span> scansione di ${esc(eng.scan.user)}: ${eng.scan.done}/${eng.scan.total} corsi`
+    : "";
+  const partito = eng.running && eng.status !== "in arresto";
+  document.getElementById("btn-avvia").disabled = partito;
+  document.getElementById("btn-ferma").disabled = !eng.running;
+
+  const inpMax = document.getElementById("inp-max");
+  const inpChrome = document.getElementById("inp-chrome");
+  if (document.activeElement !== inpMax) inpMax.value = set.max_simultaneous;
+  if (document.activeElement !== inpChrome) inpChrome.value = set.pinned_chrome || "";
+
+  // utenti
+  const tabella = document.getElementById("tabella-utenti");
+  tabella.innerHTML = stato.users.map(rigaUtente).join("");
+  document.getElementById("nessun-utente").style.display = stato.users.length ? "none" : "block";
+
+  // corsi
+  const conCorsi = stato.users.filter((u) => u.courses.length);
+  document.getElementById("lista-corsi").innerHTML = conCorsi.length
+    ? conCorsi.map(bloccoCorsiUtente).join("")
+    : "";
+  document.getElementById("nessun-corso").style.display = conCorsi.length ? "none" : "block";
+
+  // eventi
+  const eventi = (eng.events || []).slice().reverse();
+  document.getElementById("lista-eventi").innerHTML = eventi.map((e) =>
+    `<li><span class="ora">${esc(e.ts)}</span>${e.user ? `<span class="utente">${esc(e.user)}</span>` : ""}${esc(e.msg)}</li>`
+  ).join("") || '<li class="muto">Nessuna attività registrata.</li>';
+}
+
+async function aggiorna() {
+  let stato;
+  try {
+    const r = await fetch("/api/state");
+    if (!r.ok) throw new Error(r.statusText);
+    stato = await r.json();
+  } catch (e) {
+    falliteDiFila++;
+    if (falliteDiFila >= SOGLIA_FALLIMENTI) mostraServerFermo(e.message);
+    return;
+  }
+  // Il server ha risposto: il contatto c'e' stato. Un eventuale errore di
+  // rendering da qui in poi e' un bug della pagina, non un server fermo, e
+  // non deve far scattare il banner.
+  const eraGiu = falliteDiFila >= SOGLIA_FALLIMENTI;
+  falliteDiFila = 0;
+  ultimoContatto = new Date();
+  if (eraGiu) nascondiServerFermo();
+  try {
+    renderizza(stato);
+  } catch (e) {
+    console.error("renderizzazione non riuscita", e);
+    mostraErrore("Errore di rendering della pagina: " + e.message);
+  }
+}
+
+/* --------------------------------------------------------------- azioni */
+
+document.getElementById("btn-avvia").addEventListener("click", async () => {
+  try { await post("/api/engine/start"); } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+document.getElementById("btn-ferma").addEventListener("click", async () => {
+  try { await post("/api/engine/stop"); } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+document.getElementById("btn-salva-set").addEventListener("click", async () => {
+  try {
+    await post("/api/settings", {
+      max_simultaneous: parseInt(document.getElementById("inp-max").value, 10),
+      pinned_chrome: document.getElementById("inp-chrome").value.trim(),
+    });
+    mostraErrore("");
+  } catch (e) { mostraErrore(e.message); }
+});
+document.getElementById("btn-aggiungi").addEventListener("click", async () => {
+  const u = document.getElementById("inp-utente").value.trim();
+  const p = document.getElementById("inp-password").value;
+  if (!u) return mostraErrore("Serve almeno lo username.");
+  try {
+    await post("/api/users", { username: u, password: p });
+    document.getElementById("inp-utente").value = "";
+    document.getElementById("inp-password").value = "";
+    mostraErrore("");
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+document.getElementById("btn-importa").addEventListener("click", async () => {
+  const file = document.getElementById("inp-csv").files[0];
+  if (!file) return mostraErrore("Scegli prima un file CSV.");
+  const corpo = new FormData();
+  corpo.append("file", file);
+  try {
+    const r = await fetch("/api/users/import", { method: "POST", body: corpo });
+    const dati = await r.json();
+    if (!r.ok) throw new Error(dati.error || r.statusText);
+    mostraErrore(`Importati ${dati.total} utenti (${dati.added} nuovi, ${dati.updated} aggiornati).`);
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+document.getElementById("btn-importa-testo").addEventListener("click", async () => {
+  const testo = document.getElementById("ta-csv").value;
+  if (!testo.trim()) return mostraErrore("Niente da importare.");
+  try {
+    const dati = await post("/api/users/import", { text: testo });
+    document.getElementById("ta-csv").value = "";
+    mostraErrore(`Importati ${dati.total} utenti (${dati.added} nuovi, ${dati.updated} aggiornati).`);
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
+document.body.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-azione]");
+  if (!btn) return;
+  const u = btn.dataset.u, c = btn.dataset.c, azione = btn.dataset.azione;
+  if (azione === "rimuovi" && !confirm(`Rimuovere l'utente ${u} e i suoi dati?`)) return;
+  btn.disabled = true;
+  try {
+    if (azione === "rescan") await post(`/api/users/${encodeURIComponent(u)}/rescan`);
+    else if (azione === "retry") await post(`/api/users/${encodeURIComponent(u)}/retry`);
+    else if (azione === "rimuovi") await fetch(`/api/users/${encodeURIComponent(u)}`, { method: "DELETE" });
+    else if (azione === "riapri") await post(`/api/users/${encodeURIComponent(u)}/courses/${encodeURIComponent(c)}/reopen`);
+    mostraErrore("");
+  } catch (e) { mostraErrore(e.message); btn.disabled = false; }
+  aggiorna();
+});
+
+aggiorna();
+setInterval(aggiorna, 2000);
+</script>
+</body>
+</html>
