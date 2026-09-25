@@ -959,6 +959,25 @@ class Engine:
         )
         return modificato, None
 
+    def clear_users(self) -> int:
+        """Rimuove tutti gli utenti e chiude i loro browser.
+
+        Il motore, se e' acceso, resta su ma resta anche a piedi: senza
+        utenti non ha niente da scansionare ne' da aprire.
+        """
+        with self.lock:
+            sessioni = list(self.sessions.values())
+        for sess in sessioni:
+            if sess.is_alive():
+                sess.cmds.put(("quit", None))
+        with self.lock:
+            self.open_attempts.clear()
+            self.dead_until.clear()
+            self.video_info.clear()
+        quanti = self.store.clear_users()
+        self.event("", "utenti svuotati: rimossi tutti i browser e i dati")
+        return quanti
+
     def rescan_user(self, username: str) -> bool:
         """Riscansione: dal browser aperto se c'e', altrimenti con uno suo.
 

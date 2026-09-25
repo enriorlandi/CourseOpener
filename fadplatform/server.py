@@ -151,6 +151,11 @@ def create_app(store: Store, engine: Engine) -> Flask:
         rimosso = engine.drop_user(username)
         return jsonify({"removed": rimosso})
 
+    @app.delete("/api/users")
+    def api_clear_users():
+        quanti = engine.clear_users()
+        return jsonify({"removed": quanti})
+
     @app.post("/api/users/import")
     def api_import_csv():
         testo = ""

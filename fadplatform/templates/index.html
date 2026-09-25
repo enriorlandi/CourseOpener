@@ -127,6 +127,8 @@
       <a href="/api/users/export" class="come-bottone">Esporta CSV</a>
       <input type="file" id="inp-csv" accept=".csv,text/csv">
       <button id="btn-importa">Importa CSV</button>
+      <span style="width:12px"></span>
+      <button id="btn-svuota" class="pericolo">Svuota utenti</button>
     </div>
     <div class="riga-form" style="margin-bottom:12px">
       <details style="flex:1">
@@ -464,6 +466,19 @@ document.getElementById("btn-importa").addEventListener("click", async () => {
   } catch (e) { mostraErrore(e.message); }
   aggiorna();
 });
+document.getElementById("btn-svuota").addEventListener("click", async () => {
+  const quanti = (ultimoStato?.users || []).length;
+  if (!quanti) return mostraErrore("Non c'e' nessun utente da rimuovere.");
+  if (!confirm(`Rimuovere TUTTI i ${quanti} utenti e i loro corsi? Non si puo' annullare.`)) return;
+  try {
+    const r = await fetch("/api/users", { method: "DELETE" });
+    const dati = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(dati.error || r.statusText);
+    mostraErrore(`Svuotato: rimossi ${dati.removed} utenti.`);
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
 document.getElementById("btn-importa-testo").addEventListener("click", async () => {
   const testo = document.getElementById("ta-csv").value;
   if (!testo.trim()) return mostraErrore("Niente da importare.");

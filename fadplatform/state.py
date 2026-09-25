@@ -205,6 +205,17 @@ class Store:
                 return True
             return False
 
+    def clear_users(self) -> int:
+        """Svuota l'elenco utenti — e con loro i corsi scoperti.
+
+        Le impostazioni restano. Ritorna quanti utenti ha rimosso.
+        """
+        with self.lock:
+            quanti = len(self.data["users"])
+            self.data["users"] = []
+            self.save()
+            return quanti
+
     def set_login_error(self, username: str, message: str | None) -> None:
         with self.lock:
             u = self.get_user(username)
