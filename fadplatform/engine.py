@@ -470,6 +470,9 @@ class Engine:
     def __init__(self, store: Store, headless: bool = False):
         self.store = store
         self.headless = headless
+        # Whitelist di utenti su cui lavorare: None = tutti. La sceglie chi
+        # avvia il motore ("solo sui selezionati") e muore con lui.
+        self.only_users: set[str] | None = None
         self.reports: queue.Queue = queue.Queue()
         self.control: queue.Queue = queue.Queue()
         self.lock = threading.RLock()
@@ -487,10 +490,16 @@ class Engine:
 
     # ---------------------------------------------------------- ciclo vita
 
-    def start(self) -> bool:
+    def start(self, only: list[str] | None = None) -> bool:
+        """Avvia il motore, su tutti gli utenti o solo su ``only``."""
         with self.lock:
             if self.thread is not None and self.thread.is_alive():
                 return False
+            if only is not None:
+                vivi = {u["username"] for u in self.store.users()}
+                self.only_users = {n for n in only if n in vivi}
+            else:
+                self.only_users = None
             self._stop_flag = False
             self.status = "avvio"
             self.thread = threading.Thread(target=self._run, name="engine", daemon=True)
@@ -566,6 +575,7 @@ class Engine:
             self.ports_in_use.clear()
             self.video_info.clear()
             self.scan_now = None
+            self.only_users = None
         self._revert_all_running()
         self.store.save()
         self.status = "fermo"
@@ -597,11 +607,15 @@ class Engine:
         with self.lock:
             return username in self._scanning_now
 
+    def _utente_attivo(self, username: str) -> bool:
+        """True se il motore, come e' stato avviato, lavora su questo utente."""
+        return self.only_users is None or username in self.only_users
+
     def _scan_missing(self) -> None:
         for user in self.store.users():
             if self._stop_requested():
                 return
-            if user.get("last_scan") is None and not self._scanning(user["username"]):
+            if user.get("last_scan") is None and not self._scanning(user["username"]) and self._utente_attivo(user["username"]):
                 self._scan_user(user)
 
     def _maybe_scan_new_users(self) -> None:
@@ -611,6 +625,7 @@ class Engine:
                 user.get("last_scan") is None
                 and not user.get("login_error")
                 and not self._scanning(user["username"])
+                and self._utente_attivo(user["username"])
             ):
                 self._scan_user(user)
                 return  # uno alla volta, il prossimo giro prende il seguente
@@ -702,6 +717,8 @@ class Engine:
             if u.get("login_error"):
                 continue
             if self.dead_until.get(u["username"], 0) > adesso:
+                continue
+            if not self._utente_attivo(u["username"]):
                 continue
             for c in u["courses"]:
                 if c["status"] == STATUS_PENDING:
@@ -997,6 +1014,34 @@ class Engine:
         ).start()
         return True
 
+    def rescan_many(self, usernames: list[str]) -> int:
+        """Riscansiona piu' utenti, in sequenza in un thread solo.
+
+        Una fila, non un browser per utente: riscansionare in parallelo dieci
+        account aprirebbe dieci Chrome tutti insieme.
+        """
+        da_fare = [n for n in usernames if self.store.get_user(n) is not None]
+
+        def lavoro():
+            for nome in da_fare:
+                utente = self.store.get_user(nome)
+                if utente is None:
+                    continue
+                if any(c["status"] == STATUS_RUNNING for c in utente["courses"]):
+                    self.event(nome, "riscansione saltata: ha corsi in riproduzione")
+                    continue
+                if self._scanning(nome):
+                    continue
+                with self.lock:
+                    sess = self.sessions.get(nome)
+                if sess is not None and sess.is_alive():
+                    sess.cmds.put(("rescan", None))
+                else:
+                    self._scan_user(utente)
+
+        threading.Thread(target=lavoro, daemon=True, name="rescan-bulk").start()
+        return len(da_fare)
+
     def retry_login(self, username: str) -> None:
         """Sblocca un utente fermato da login errata o da un browser morto."""
         with self.lock:
@@ -1014,6 +1059,7 @@ class Engine:
                 "running": self.is_running(),
                 "status": self.status,
                 "headless": self.headless,
+                "only_users": sorted(self.only_users) if self.only_users is not None else None,
                 "windows": self._running_count(),
                 "scan": {"user": self.scan_now[0], "done": self.scan_now[1], "total": self.scan_now[2]}
                 if self.scan_now

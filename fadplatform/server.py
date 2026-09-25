@@ -176,6 +176,18 @@ def create_app(store: Store, engine: Engine) -> Flask:
             aggiornati += int(not creato)
         return jsonify({"added": aggiunti, "updated": aggiornati, "total": len(utenti)})
 
+    @app.post("/api/users/bulk")
+    def api_users_bulk():
+        corpo = request.get_json(silent=True) or {}
+        azione = corpo.get("action")
+        nomi = [n for n in (corpo.get("usernames") or []) if isinstance(n, str) and store.get_user(n)]
+        if azione not in ("remove", "rescan") or not nomi:
+            return jsonify({"error": "servono action ('remove' o 'rescan') e almeno un utente esistente"}), 400
+        if azione == "remove":
+            rimossi = sum(1 for n in nomi if engine.drop_user(n))
+            return jsonify({"removed": rimossi})
+        return jsonify({"queued": engine.rescan_many(nomi)})
+
     @app.post("/api/users/<username>/rescan")
     def api_rescan_user(username: str):
         utente = store.get_user(username)
@@ -235,7 +247,16 @@ def create_app(store: Store, engine: Engine) -> Flask:
     def api_engine_start():
         if not store.users():
             return jsonify({"error": "nessun utente configurato"}), 409
-        avviato = engine.start()
+        corpo = request.get_json(silent=True) or {}
+        solo = corpo.get("only")
+        if solo is not None:
+            if not isinstance(solo, list) or not all(isinstance(s, str) for s in solo):
+                return jsonify({"error": "only deve essere una lista di username"}), 400
+            vivi = {u["username"] for u in store.users()}
+            solo = [s for s in solo if s in vivi]
+            if not solo:
+                return jsonify({"error": "nessun utente valido selezionato"}), 400
+        avviato = engine.start(only=solo)
         return jsonify({"started": avviato})
 
     @app.post("/api/engine/stop")

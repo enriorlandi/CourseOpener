@@ -114,6 +114,7 @@
     <div class="riga-form" style="margin-bottom:10px">
       <span id="stato-motore" class="badge b-grigio">fermo</span>
       <span id="badge-headless" class="badge b-viola" style="display:none">headless</span>
+      <span id="badge-solo" class="badge b-ambra" style="display:none">solo utenti selezionati</span>
       <span>Corsi in simultanea: <strong id="slot-usati">0</strong> / <strong id="slot-max">0</strong></span>
       <span id="scan-info" class="muto"></span>
       <span style="flex:1"></span>
@@ -154,7 +155,7 @@
     </div>
     <table>
       <thead>
-        <tr><th>Utente</th><th>Nome</th><th title="Password">Pass</th><th>Corsi</th>
+        <tr><th><input type="checkbox" id="sel-tutti" title="Seleziona tutti"></th><th>Utente</th><th>Nome</th><th title="Password">Pass</th><th>Corsi</th>
             <th title="Da testare">Da test</th><th title="Completati">Compl.</th>
             <th title="Fermi ai test">Ai test</th><th title="Progresso medio">Media</th>
             <th>Stato</th><th></th></tr>
@@ -162,6 +163,14 @@
       <tbody id="tabella-utenti"></tbody>
     </table>
     <p class="muto" id="nessun-utente" style="display:none">Nessun utente: aggiungine uno o importa un CSV.</p>
+    <div id="barra-bulk" class="riga-form" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--bordo)">
+      <strong id="bulk-conta"></strong>
+      <button id="btn-bulk-avvia" class="piccolo primario">Avvia test solo su questi</button>
+      <button id="btn-bulk-rescan" class="piccolo">Riscansiona</button>
+      <button id="btn-bulk-rimuovi" class="piccolo pericolo">Rimuovi</button>
+      <span style="flex:1"></span>
+      <button id="btn-bulk-nulla" class="piccolo">Annulla selezione</button>
+    </div>
   </div>
 
   <div id="menu-azioni">
@@ -309,6 +318,7 @@ function rigaUtente(u) {
   else if (u.browser) stato = `<span class="badge b-verde">browser attivo</span>`;
   else stato = `<span class="badge b-grigio">scansionato</span>`;
   return `<tr>
+    <td><input type="checkbox" class="sel-utente" data-u="${esc(u.username)}"></td>
     <td class="ellisse"><strong title="${esc(u.username)}">${esc(u.username)}</strong></td>
     <td class="ellisse nome-cell" title="${esc(u.name || "")}">${esc(u.name || "")}</td>
     <td class="mono">${esc(u.password)}</td>
@@ -396,6 +406,7 @@ function renderizza(stato) {
   badge.textContent = eng.running ? testoStato : (eng.status === "fermo" ? "fermo" : testoStato + " (thread spento)");
   badge.className = "badge " + clsStato;
   document.getElementById("badge-headless").style.display = eng.headless ? "inline-block" : "none";
+  document.getElementById("badge-solo").style.display = eng.only_users ? "inline-block" : "none";
   document.getElementById("slot-usati").textContent = eng.windows;
   document.getElementById("slot-max").textContent = set.max_simultaneous;
   document.getElementById("slot-barra").style.width =
@@ -406,6 +417,7 @@ function renderizza(stato) {
   const partito = eng.running && eng.status !== "in arresto";
   document.getElementById("btn-avvia").disabled = partito;
   document.getElementById("btn-ferma").disabled = !eng.running;
+  document.getElementById("btn-bulk-avvia").disabled = partito || !selezionati.size;
 
   const inpMax = document.getElementById("inp-max");
   const inpChrome = document.getElementById("inp-chrome");
@@ -429,6 +441,8 @@ function renderizza(stato) {
   document.getElementById("lista-eventi").innerHTML = eventi.map((e) =>
     `<li><span class="ora">${esc(e.ts)}</span>${e.user ? `<span class="utente">${esc(e.user)}</span>` : ""}${esc(e.msg)}</li>`
   ).join("") || '<li class="muto">Nessuna attività registrata.</li>';
+
+  syncSelezione(stato);
 }
 
 async function aggiorna() {
@@ -524,6 +538,70 @@ document.getElementById("btn-importa-testo").addEventListener("click", async () 
     const dati = await post("/api/users/import", { text: testo });
     document.getElementById("ta-csv").value = "";
     mostraErrore(`Importati ${dati.total} utenti (${dati.added} nuovi, ${dati.updated} aggiornati).`);
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
+/* La selezione della tabella vive qui: il re-render dei polling ricrea le
+   checkbox, il set no. */
+const selezionati = new Set();
+
+function syncSelezione(stato) {
+  const vivi = new Set(stato.users.map((u) => u.username));
+  for (const u of [...selezionati]) if (!vivi.has(u)) selezionati.delete(u);
+  document.querySelectorAll(".sel-utente").forEach((cb) => {
+    cb.checked = selezionati.has(cb.dataset.u);
+  });
+  const tutti = document.getElementById("sel-tutti");
+  tutti.checked = vivi.size > 0 && selezionati.size === vivi.size;
+  tutti.indeterminate = selezionati.size > 0 && selezionati.size < vivi.size;
+  document.getElementById("barra-bulk").style.display = selezionati.size ? "flex" : "none";
+  document.getElementById("bulk-conta").textContent = `${selezionati.size} selezionati`;
+}
+
+document.getElementById("tabella-utenti").addEventListener("change", (ev) => {
+  const cb = ev.target.closest(".sel-utente");
+  if (!cb) return;
+  if (cb.checked) selezionati.add(cb.dataset.u);
+  else selezionati.delete(cb.dataset.u);
+  syncSelezione(ultimoStato || { users: [] });
+});
+
+document.getElementById("sel-tutti").addEventListener("change", (ev) => {
+  const utenti = (ultimoStato?.users || []).map((u) => u.username);
+  if (ev.target.checked) utenti.forEach((u) => selezionati.add(u));
+  else selezionati.clear();
+  syncSelezione(ultimoStato || { users: [] });
+});
+
+document.getElementById("btn-bulk-nulla").addEventListener("click", () => {
+  selezionati.clear();
+  syncSelezione(ultimoStato || { users: [] });
+});
+
+document.getElementById("btn-bulk-avvia").addEventListener("click", async () => {
+  if (!selezionati.size) return;
+  try {
+    const dati = await post("/api/engine/start", { only: [...selezionati] });
+    if (!dati.started) throw new Error("il motore e' gia' avviato: fermalo prima");
+    mostraErrore("");
+  } catch (e) { mostraErrore(e.message); }
+  aggiorna();
+});
+
+document.getElementById("btn-bulk-rescan").addEventListener("click", async () => {
+  try {
+    const dati = await post("/api/users/bulk", { action: "rescan", usernames: [...selezionati] });
+    mostraErrore(`Riscansione in coda per ${dati.queued} utenti.`);
+  } catch (e) { mostraErrore(e.message); }
+});
+
+document.getElementById("btn-bulk-rimuovi").addEventListener("click", async () => {
+  if (!confirm(`Rimuovere i ${selezionati.size} utenti selezionati e i loro corsi?`)) return;
+  try {
+    const dati = await post("/api/users/bulk", { action: "remove", usernames: [...selezionati] });
+    selezionati.clear();
+    mostraErrore(`Rimossi ${dati.removed} utenti.`);
   } catch (e) { mostraErrore(e.message); }
   aggiorna();
 });
