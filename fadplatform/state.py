@@ -132,12 +132,13 @@ class Store:
                     return u
             return None
 
-    def upsert_user(self, username: str, password: str) -> tuple[dict, bool]:
-        """Aggiunge l'utente o, se esiste, gli aggiorna la password.
+    def upsert_user(self, username: str, password: str, name: str | None = None) -> tuple[dict, bool]:
+        """Aggiunge l'utente o, se esiste, gli aggiorna password e nome.
 
         Nessun controllo su lunghezza o caratteri: sono credenziali di test.
         Ritorna (utente, creato_adesso). La password nuova invalida un'eventuale
-        errore di login precedente, ma non i corsi gia' scoperti.
+        errore di login precedente, ma non i corsi gia' scoperti. ``name`` e'
+        facoltativo e serve solo da etichetta nella UI: None lo lascia com'e'.
         """
         username = (username or "").strip()
         password = password or ""
@@ -147,11 +148,14 @@ class Store:
                     if u.get("password") != password:
                         u["password"] = password
                         u["login_error"] = None
-                        self.save()
+                    if name is not None:
+                        u["name"] = name
+                    self.save()
                     return u, False
             u = {
                 "username": username,
                 "password": password,
+                "name": name or "",
                 "slug": profile_slug(username),
                 "added_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "last_scan": None,
@@ -161,6 +165,36 @@ class Store:
             self.data["users"].append(u)
             self.save()
             return u, True
+
+    def update_user(
+        self,
+        username: str,
+        new_username: str | None = None,
+        name: str | None = None,
+        password: str | None = None,
+    ) -> dict | None:
+        """Modifica un utente esistente; None se non c'e'.
+
+        Cambiare username cambia anche lo slug (quindi il profilo browser che
+        lo usa): la coerenza la garantisce chi chiama, non lo store.
+        ``name``/``password`` a None significano "non toccare".
+        """
+        new_username = (new_username or "").strip() or None
+        with self.lock:
+            for u in self.data["users"]:
+                if u["username"] != username:
+                    continue
+                if new_username and new_username != username:
+                    u["username"] = new_username
+                    u["slug"] = profile_slug(new_username)
+                if name is not None:
+                    u["name"] = name
+                if password is not None and u.get("password") != password:
+                    u["password"] = password
+                    u["login_error"] = None
+                self.save()
+                return u
+            return None
 
     def remove_user(self, username: str) -> bool:
         with self.lock:
@@ -290,10 +324,14 @@ class Store:
             if c["status"] != STATUS_NO_ACTIVITY:
                 contati += 1
                 somma += c.get("progress") or 0
+        completati = per_stato.get(STATUS_COMPLETED, 0)
         return {
             "total": totale,
             "counted": contati,
-            "completed": per_stato.get(STATUS_COMPLETED, 0),
+            # Quanto manca all'obiettivo del 100%: tutto cio' che non e'
+            # completato (in coda, in riproduzione, fermo ai test, in errore).
+            "to_test": totale - completati - per_stato.get(STATUS_NO_ACTIVITY, 0),
+            "completed": completati,
             "ai_test": per_stato.get(STATUS_AI_TEST, 0),
             "pending": per_stato.get(STATUS_PENDING, 0),
             "running": per_stato.get(STATUS_RUNNING, 0),

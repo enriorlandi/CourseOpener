@@ -41,6 +41,8 @@
   button.pericolo { color: var(--rosso); border-color: #ffc8c2; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   button.piccolo { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+  a.come-bottone { display: inline-block; padding: 6px 10px; border: 1px solid var(--bordo);
+    border-radius: 7px; background: #fff; color: var(--testo); text-decoration: none; }
   .badge {
     display: inline-block; padding: 1px 9px; border-radius: 999px;
     font-size: 11.5px; font-weight: 600; white-space: nowrap;
@@ -72,6 +74,12 @@
   ul.eventi li .ora { color: var(--muto); margin-right: 6px; font-variant-numeric: tabular-nums; }
   ul.eventi li .utente { font-weight: 600; margin-right: 6px; }
   .azioni-cella button { margin: 1px 0; }
+  dialog { border: 1px solid var(--bordo); border-radius: 10px; padding: 16px 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.28); }
+  .campo { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+  .campo label { font-size: 12px; color: var(--muto); }
+  dialog .nota { background: #fff8c5; color: var(--ambra); border-radius: 6px;
+    padding: 6px 10px; font-size: 12.5px; margin: 0 0 10px; display: none; }
   .errore-banner { background: #ffebe9; border: 1px solid #ffc8c2; color: var(--rosso);
     border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; display: none; }
   .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid #c8cdd3;
@@ -111,29 +119,57 @@
   <div class="carta">
     <h2>Utenti di test</h2>
     <div class="riga-form" style="margin-bottom:12px">
-      <input id="inp-utente" type="text" placeholder="username" style="width:190px">
-      <input id="inp-password" type="text" placeholder="password" style="width:130px">
+      <input id="inp-utente" type="text" placeholder="username" style="width:180px">
+      <input id="inp-nome" type="text" placeholder="nome (facoltativo)" style="width:150px">
+      <input id="inp-password" type="text" placeholder="password" style="width:120px">
       <button id="btn-aggiungi">Aggiungi</button>
       <span style="flex:1"></span>
+      <a href="/api/users/export" class="come-bottone">Esporta CSV</a>
       <input type="file" id="inp-csv" accept=".csv,text/csv">
       <button id="btn-importa">Importa CSV</button>
     </div>
     <div class="riga-form" style="margin-bottom:12px">
       <details style="flex:1">
-        <summary class="muto" style="cursor:pointer">oppure incolla il CSV (due colonne: username,password)</summary>
-        <textarea id="ta-csv" rows="4" style="width:100%;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px" placeholder="MarioRossi,1234&#10;MarcoBianchi,1234"></textarea>
+        <summary class="muto" style="cursor:pointer">oppure incolla il CSV (username,password e nome facoltativo in terza colonna)</summary>
+        <textarea id="ta-csv" rows="4" style="width:100%;margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px" placeholder="MarioRossi,1234,Mario Rossi&#10;MarcoBianchi,1234"></textarea>
         <button id="btn-importa-testo" style="margin-top:6px">Importa testo</button>
       </details>
     </div>
     <table>
       <thead>
-        <tr><th>Utente</th><th>Password</th><th>Corsi</th><th>Completati</th><th>Fermi ai test</th>
+        <tr><th>Utente</th><th>Nome</th><th>Password</th><th>Corsi</th><th>Da testare</th><th>Completati</th><th>Fermi ai test</th>
             <th>Progresso medio</th><th>Stato</th><th>Azioni</th></tr>
       </thead>
       <tbody id="tabella-utenti"></tbody>
     </table>
     <p class="muto" id="nessun-utente" style="display:none">Nessun utente: aggiungine uno o importa un CSV.</p>
   </div>
+
+  <dialog id="dialog-utente">
+    <form method="dialog" id="form-utente" style="min-width:360px">
+      <h3 style="margin:0 0 10px">Modifica utente</h3>
+      <p id="edit-nota" class="nota">
+        Cambiare lo username sposta anche il profilo del browser di quell'utente:
+        si puo' fare solo quando non ha browser attivi.
+      </p>
+      <div class="campo">
+        <label for="edit-username">Username</label>
+        <input id="edit-username" type="text">
+      </div>
+      <div class="campo">
+        <label for="edit-nome">Nome (facoltativo, solo per riconoscerlo)</label>
+        <input id="edit-nome" type="text">
+      </div>
+      <div class="campo">
+        <label for="edit-password">Password</label>
+        <input id="edit-password" type="text">
+      </div>
+      <menu style="display:flex;gap:8px;justify-content:flex-end;margin:12px 0 0;padding:0;list-style:none">
+        <button value="cancel" type="submit">Annulla</button>
+        <button value="save" type="submit" class="primario">Salva</button>
+      </menu>
+    </form>
+  </dialog>
 
   <div class="carta">
     <h2>Corsi per utente</h2>
@@ -158,6 +194,11 @@ const STATO_BADGE = {
   error: ["errore", "b-rosso"],
   no_activity: ["senza attività", "b-ambra"],
 };
+
+/* L'ultimo /api/state ricevuto: serve ai pulsanti che hanno bisogno dei dati
+   dell'utente, non solo del suo username. */
+let ultimoStato = null;
+let utenteInModifica = null;
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -244,14 +285,17 @@ function rigaUtente(u) {
   const dettaglio = u.login_error
     ? `<div class="muto" style="font-size:12px">${esc(u.login_error)}</div>` : "";
   const azioni = [
+    `<button class="piccolo" data-azione="modifica" data-u="${esc(u.username)}">Modifica</button>`,
     `<button class="piccolo" data-azione="rescan" data-u="${esc(u.username)}">Riscansiona</button>`,
     u.login_error ? `<button class="piccolo" data-azione="retry" data-u="${esc(u.username)}">Riprova login</button>` : "",
     `<button class="piccolo pericolo" data-azione="rimuovi" data-u="${esc(u.username)}">Rimuovi</button>`,
   ].join(" ");
   return `<tr>
     <td><strong>${esc(u.username)}</strong>${dettaglio}</td>
+    <td>${esc(u.name || "")}</td>
     <td class="mono">${esc(u.password)}</td>
     <td>${t.total}</td>
+    <td>${t.to_test}</td>
     <td>${t.completed}</td>
     <td>${t.ai_test}</td>
     <td><span class="perc">${t.avg_progress}%</span></td>
@@ -280,8 +324,9 @@ function bloccoCorsiUtente(u) {
   }).join("");
   return `<details class="utente"${u.courses.some((c) => c.status === "running") ? " open" : ""}>
     <summary>
-      <strong>${esc(u.username)}</strong>
+      <strong>${esc(u.username)}</strong>${u.name ? ` <span class="muto">${esc(u.name)}</span>` : ""}
       <span class="badge b-grigio">${t.total} corsi</span>
+      ${t.to_test ? `<span class="badge b-ambra">${t.to_test} da testare</span>` : ""}
       <span class="badge b-verde">${t.completed} completati</span>
       <span class="badge b-viola">${t.ai_test} ai test</span>
       <span class="badge b-blu">${t.running} attivi</span>
@@ -365,6 +410,7 @@ async function aggiorna() {
   ultimoContatto = new Date();
   if (eraGiu) nascondiServerFermo();
   try {
+    ultimoStato = stato;
     renderizza(stato);
   } catch (e) {
     console.error("renderizzazione non riuscita", e);
@@ -393,11 +439,13 @@ document.getElementById("btn-salva-set").addEventListener("click", async () => {
 });
 document.getElementById("btn-aggiungi").addEventListener("click", async () => {
   const u = document.getElementById("inp-utente").value.trim();
+  const n = document.getElementById("inp-nome").value.trim();
   const p = document.getElementById("inp-password").value;
   if (!u) return mostraErrore("Serve almeno lo username.");
   try {
-    await post("/api/users", { username: u, password: p });
+    await post("/api/users", { username: u, password: p, name: n });
     document.getElementById("inp-utente").value = "";
+    document.getElementById("inp-nome").value = "";
     document.getElementById("inp-password").value = "";
     mostraErrore("");
   } catch (e) { mostraErrore(e.message); }
@@ -432,6 +480,17 @@ document.body.addEventListener("click", async (ev) => {
   if (!btn) return;
   const u = btn.dataset.u, c = btn.dataset.c, azione = btn.dataset.azione;
   if (azione === "rimuovi" && !confirm(`Rimuovere l'utente ${u} e i suoi dati?`)) return;
+  if (azione === "modifica") {
+    const ut = (ultimoStato?.users || []).find((x) => x.username === u);
+    if (!ut) return;
+    utenteInModifica = u;
+    document.getElementById("edit-username").value = ut.username;
+    document.getElementById("edit-nome").value = ut.name || "";
+    document.getElementById("edit-password").value = ut.password || "";
+    document.getElementById("edit-nota").style.display = "none";
+    document.getElementById("dialog-utente").showModal();
+    return;
+  }
   btn.disabled = true;
   try {
     if (azione === "rescan") await post(`/api/users/${encodeURIComponent(u)}/rescan`);
@@ -440,6 +499,35 @@ document.body.addEventListener("click", async (ev) => {
     else if (azione === "riapri") await post(`/api/users/${encodeURIComponent(u)}/courses/${encodeURIComponent(c)}/reopen`);
     mostraErrore("");
   } catch (e) { mostraErrore(e.message); btn.disabled = false; }
+  aggiorna();
+});
+
+/* ------------------------------------------------------ dialog modifica */
+
+document.getElementById("edit-username").addEventListener("input", (ev) => {
+  const diverso = utenteInModifica && ev.target.value.trim() !== utenteInModifica;
+  document.getElementById("edit-nota").style.display = diverso ? "block" : "none";
+});
+
+document.getElementById("dialog-utente").addEventListener("close", async () => {
+  const dialog = document.getElementById("dialog-utente");
+  if (dialog.returnValue !== "save" || !utenteInModifica) { utenteInModifica = null; return; }
+  const corpo = {
+    username: document.getElementById("edit-username").value.trim(),
+    name: document.getElementById("edit-nome").value.trim(),
+    password: document.getElementById("edit-password").value,
+  };
+  try {
+    const r = await fetch(`/api/users/${encodeURIComponent(utenteInModifica)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+    const dati = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(dati.error || r.statusText);
+    mostraErrore("");
+  } catch (e) { mostraErrore(e.message); }
+  utenteInModifica = null;
   aggiorna();
 });
 

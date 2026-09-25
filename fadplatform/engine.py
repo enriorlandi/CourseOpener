@@ -48,6 +48,7 @@ from .state import (
     STATUS_PENDING,
     STATUS_RUNNING,
     Store,
+    profile_slug,
 )
 
 # Quanto aspettare, alla chiusura del motore, che le sessioni chiudano da sole
@@ -909,6 +910,54 @@ class Engine:
         if sess is not None and sess.is_alive():
             sess.cmds.put(("quit", None))
         return rimosso
+
+    def rename_user(
+        self,
+        vecchio: str,
+        nuovo: str,
+        name: str | None = None,
+        password: str | None = None,
+    ) -> tuple[dict | None, str | None]:
+        """Modifica un utente (username, nome, password).
+
+        Rinominare sposta anche la cartella del profilo browser, cosi' la
+        sessione scoperta finora resta valida; serve che l'utente non abbia
+        browser accesi, perche' il suo processo punta ai percorsi vecchi.
+        Ritorna (utente, None) oppure (None, motivo_del_rifiuto).
+        """
+        with self.lock:
+            sess = self.sessions.get(vecchio)
+        if sess is not None and sess.is_alive():
+            return None, "l'utente ha il browser attivo: ferma il motore prima di modificarlo"
+        utente = self.store.get_user(vecchio)
+        if utente is None:
+            return None, "utente inesistente"
+        nuovo = (nuovo or "").strip()
+        if not nuovo:
+            return None, "username obbligatorio"
+        if nuovo != vecchio:
+            if self.store.get_user(nuovo) is not None:
+                return None, f"esiste gia' un utente '{nuovo}'"
+            vecchia_dir = moodle.PROFILES_BASE / utente["slug"]
+            nuova_dir = moodle.PROFILES_BASE / profile_slug(nuovo)
+            if vecchia_dir.is_dir() and not nuova_dir.exists():
+                try:
+                    nuova_dir.parent.mkdir(parents=True, exist_ok=True)
+                    vecchia_dir.rename(nuova_dir)
+                except OSError:
+                    pass  # resta la vecchia: alla prossima scansione se ne crea una nuova
+            with self.lock:
+                self.open_attempts = {
+                    k: v for k, v in self.open_attempts.items() if k[0] != vecchio
+                }
+                self.dead_until.pop(vecchio, None)
+                self.video_info.pop(vecchio, None)
+        modificato = self.store.update_user(vecchio, new_username=nuovo, name=name, password=password)
+        self.event(
+            nuovo,
+            f"utente modificato{f' (era {vecchio})' if nuovo != vecchio else ''}",
+        )
+        return modificato, None
 
     def rescan_user(self, username: str) -> bool:
         """Riscansione: dal browser aperto se c'e', altrimenti con uno suo.

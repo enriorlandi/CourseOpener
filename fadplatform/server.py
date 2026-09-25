@@ -13,7 +13,7 @@ from __future__ import annotations
 import csv
 import io
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 from . import __version__
 from .engine import Engine
@@ -23,12 +23,13 @@ HEADER_UTENTE = {"username", "user", "utente", "nome", "account", "login", "emai
 HEADER_PASSWORD = {"password", "pass", "pwd", "pw", "psw"}
 
 
-def parse_users_csv(text: str) -> list[tuple[str, str]]:
-    """Estrae (username, password) da un CSV a due colonne.
+def parse_users_csv(text: str) -> list[tuple[str, str, str]]:
+    """Estrae (username, password, nome) da un CSV a due o tre colonne.
 
     Accetta virgola, punto e virgola o tabulazione come separatore e salta
-    l'eventuale riga d'intestazione. Le password sono di test: nessun controllo
-    di lunghezza o caratteri, come da requisiti.
+    l'eventuale riga d'intestazione. La terza colonna, il nome, e' facoltativa:
+    e' un'etichetta per la UI, non un dato per la piattaforma. Le password sono
+    di test: nessun controllo di lunghezza o caratteri, come da requisiti.
     """
     righe = [r for r in text.splitlines() if r.strip()]
     if not righe:
@@ -37,17 +38,18 @@ def parse_users_csv(text: str) -> list[tuple[str, str]]:
     # la virgola). "delimiter" di csv.reader vuole un carattere solo.
     separatore = max(",;\t", key=righe[0].count)
     lette = list(csv.reader(io.StringIO(text), delimiter=separatore))
-    utenti: list[tuple[str, str]] = []
+    utenti: list[tuple[str, str, str]] = []
     for i, riga in enumerate(lette):
         if not riga or not any(campo.strip() for campo in riga):
             continue
         col0 = (riga[0] if riga else "").strip()
         col1 = (riga[1] if len(riga) > 1 else "").strip()
+        col2 = (riga[2] if len(riga) > 2 else "").strip()
         if i == 0 and col0.lower() in HEADER_UTENTE and col1.lower() in HEADER_PASSWORD:
             continue  # intestazione
         if not col0:
             continue
-        utenti.append((col0, col1))
+        utenti.append((col0, col1, col2))
     return utenti
 
 
@@ -78,6 +80,7 @@ def create_app(store: Store, engine: Engine) -> Flask:
             utenti.append(
                 {
                     "username": u["username"],
+                    "name": u.get("name") or "",
                     "password": u["password"],
                     "slug": u["slug"],
                     "last_scan": u.get("last_scan"),
@@ -104,8 +107,42 @@ def create_app(store: Store, engine: Engine) -> Flask:
         username = (corpo.get("username") or "").strip()
         if not username:
             return jsonify({"error": "username obbligatorio"}), 400
-        _, creato = store.upsert_user(username, corpo.get("password") or "")
+        _, creato = store.upsert_user(
+            username, corpo.get("password") or "", (corpo.get("name") or "").strip()
+        )
         return jsonify({"created": creato})
+
+    @app.put("/api/users/<username>")
+    def api_edit_user(username: str):
+        if store.get_user(username) is None:
+            return jsonify({"error": "utente inesistente"}), 404
+        corpo = request.get_json(silent=True) or {}
+        nuovo = (corpo.get("username") or "").strip()
+        if not nuovo:
+            return jsonify({"error": "username obbligatorio"}), 400
+        nome = (corpo.get("name") or "").strip()
+        if len(nome) > 200:
+            return jsonify({"error": "nome troppo lungo"}), 400
+        password = corpo.get("password")
+        if password is not None and not isinstance(password, str):
+            return jsonify({"error": "password non valida"}), 400
+        utente, errore = engine.rename_user(username, nuovo, nome, password)
+        if errore:
+            return jsonify({"error": errore}), 409
+        return jsonify({"updated": True, "username": utente["username"]})
+
+    @app.get("/api/users/export")
+    def api_export_users():
+        """I utenti in CSV, nello stesso formato che l'import si aspetta:
+        username,password,nome (il nome puo' restare vuoto)."""
+        buffer = io.StringIO()
+        scrittore = csv.writer(buffer)
+        scrittore.writerow(["username", "password", "name"])
+        for u in store.users():
+            scrittore.writerow([u["username"], u["password"], u.get("name") or ""])
+        risposta = Response(buffer.getvalue(), mimetype="text/csv; charset=utf-8")
+        risposta.headers["Content-Disposition"] = 'attachment; filename="utenti-fad.csv"'
+        return risposta
 
     @app.delete("/api/users/<username>")
     def api_remove_user(username: str):
@@ -128,8 +165,8 @@ def create_app(store: Store, engine: Engine) -> Flask:
         if not utenti:
             return jsonify({"error": "nessuna riga valida (servono due colonne: username,password)"}), 400
         aggiunti = aggiornati = 0
-        for username, password in utenti:
-            _, creato = store.upsert_user(username, password)
+        for username, password, name in utenti:
+            _, creato = store.upsert_user(username, password, name)
             aggiunti += int(creato)
             aggiornati += int(not creato)
         return jsonify({"added": aggiunti, "updated": aggiornati, "total": len(utenti)})
