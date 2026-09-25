@@ -16,7 +16,7 @@
     margin: 0; background: var(--bg); color: var(--testo);
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-  .contenitore { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+  .contenitore { max-width: 1400px; margin: 0 auto; padding: 20px 16px 60px; }
   h1 { font-size: 20px; margin: 0 0 2px; }
   .sottotitolo { color: var(--muto); margin: 0 0 18px; font-size: 12.5px; }
   .carta {
@@ -25,9 +25,15 @@
   }
   .carta > h2 { font-size: 15px; margin: 0 0 10px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bordo); vertical-align: top; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bordo);
+           vertical-align: middle; white-space: nowrap; }
   th { color: var(--muto); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
   tr:last-child td { border-bottom: none; }
+  /* Il testo lungo si taglia coi puntini, non va a capo: le righe restano
+     tutte alte uguale e la tabella non si deformera' mai. */
+  .ellisse { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .nome-cell { max-width: 260px; }
+  .titolo-corso { max-width: 560px; }
   .barra-slot { height: 8px; background: #e8eaed; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; }
   .barra-slot > div { height: 100%; background: var(--blu); }
   input, button, select {
@@ -73,7 +79,16 @@
   ul.eventi li { padding: 3px 0; border-bottom: 1px dashed var(--bordo); }
   ul.eventi li .ora { color: var(--muto); margin-right: 6px; font-variant-numeric: tabular-nums; }
   ul.eventi li .utente { font-weight: 600; margin-right: 6px; }
-  .azioni-cella button { margin: 1px 0; }
+  button.kebab { border: none; background: none; font-size: 17px; line-height: 1;
+    padding: 2px 9px; cursor: pointer; color: var(--muto); border-radius: 6px; }
+  button.kebab:hover { background: #eaeef2; color: var(--testo); }
+  #menu-azioni { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--bordo);
+    border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.16); padding: 4px;
+    display: none; min-width: 170px; }
+  #menu-azioni button { display: block; width: 100%; text-align: left; border: none;
+    background: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+  #menu-azioni button:hover { background: #f0f3f6; }
+  #menu-azioni button.pericolo { color: var(--rosso); }
   dialog { border: 1px solid var(--bordo); border-radius: 10px; padding: 16px 18px; }
   dialog::backdrop { background: rgba(0,0,0,.28); }
   .campo { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
@@ -139,12 +154,21 @@
     </div>
     <table>
       <thead>
-        <tr><th>Utente</th><th>Nome</th><th>Password</th><th>Corsi</th><th>Da testare</th><th>Completati</th><th>Fermi ai test</th>
-            <th>Progresso medio</th><th>Stato</th><th>Azioni</th></tr>
+        <tr><th>Utente</th><th>Nome</th><th title="Password">Pass</th><th>Corsi</th>
+            <th title="Da testare">Da test</th><th title="Completati">Compl.</th>
+            <th title="Fermi ai test">Ai test</th><th title="Progresso medio">Media</th>
+            <th>Stato</th><th></th></tr>
       </thead>
       <tbody id="tabella-utenti"></tbody>
     </table>
     <p class="muto" id="nessun-utente" style="display:none">Nessun utente: aggiungine uno o importa un CSV.</p>
+  </div>
+
+  <div id="menu-azioni">
+    <button data-azione="modifica">Modifica…</button>
+    <button data-azione="rescan">Riscansiona</button>
+    <button data-azione="retry">Riprova login</button>
+    <button data-azione="rimuovi" class="pericolo">Rimuovi…</button>
   </div>
 
   <dialog id="dialog-utente">
@@ -280,21 +304,13 @@ function cellaVideo(corso) {
 function rigaUtente(u) {
   const t = u.totals;
   let stato;
-  if (u.login_error) stato = `<span class="badge b-rosso">login errata</span>`;
+  if (u.login_error) stato = `<span class="badge b-rosso" title="${esc(u.login_error)}">login errata</span>`;
   else if (!u.last_scan) stato = `<span class="badge b-grigio">da scansionare</span>`;
   else if (u.browser) stato = `<span class="badge b-verde">browser attivo</span>`;
   else stato = `<span class="badge b-grigio">scansionato</span>`;
-  const dettaglio = u.login_error
-    ? `<div class="muto" style="font-size:12px">${esc(u.login_error)}</div>` : "";
-  const azioni = [
-    `<button class="piccolo" data-azione="modifica" data-u="${esc(u.username)}">Modifica</button>`,
-    `<button class="piccolo" data-azione="rescan" data-u="${esc(u.username)}">Riscansiona</button>`,
-    u.login_error ? `<button class="piccolo" data-azione="retry" data-u="${esc(u.username)}">Riprova login</button>` : "",
-    `<button class="piccolo pericolo" data-azione="rimuovi" data-u="${esc(u.username)}">Rimuovi</button>`,
-  ].join(" ");
   return `<tr>
-    <td><strong>${esc(u.username)}</strong>${dettaglio}</td>
-    <td>${esc(u.name || "")}</td>
+    <td class="ellisse"><strong title="${esc(u.username)}">${esc(u.username)}</strong></td>
+    <td class="ellisse nome-cell" title="${esc(u.name || "")}">${esc(u.name || "")}</td>
     <td class="mono">${esc(u.password)}</td>
     <td>${t.total}</td>
     <td>${t.to_test}</td>
@@ -302,9 +318,31 @@ function rigaUtente(u) {
     <td>${t.ai_test}</td>
     <td><span class="perc">${t.avg_progress}%</span></td>
     <td>${stato}</td>
-    <td class="azioni-cella">${azioni}</td>
+    <td><button class="kebab" data-menu-utente="${esc(u.username)}" title="Azioni">⋮</button></td>
   </tr>`;
 }
+
+/* La lista dei corsi viene rigenerata a ogni polling: l'attributo open del
+   tag details si ricalcolerebbe da solo (aperto se qualcosa e' in
+   riproduzione) e la chiusura dell'utente durerebbe due secondi. Qui si
+   ricorda invece la scelta esplicita, che vince sull'auto-apertura. */
+const scelteDettagli = new Map();
+
+function dettagliAperti(u) {
+  if (scelteDettagli.has(u.username)) return scelteDettagli.get(u.username);
+  return u.courses.some((c) => c.status === "running");
+}
+
+document.addEventListener(
+  "toggle",
+  (ev) => {
+    const det = ev.target;
+    if (det.tagName === "DETAILS" && det.dataset.utente) {
+      scelteDettagli.set(det.dataset.utente, det.open);
+    }
+  },
+  true
+);
 
 function bloccoCorsiUtente(u) {
   const t = u.totals;
@@ -316,7 +354,7 @@ function bloccoCorsiUtente(u) {
       ? `<button class="piccolo" data-azione="riapri" data-u="${esc(u.username)}" data-c="${esc(c.id)}">Rimetti in coda</button>`
       : "";
     return `<tr>
-      <td>${esc(c.title)}</td>
+      <td class="titolo-corso ellisse" title="${esc(c.title)}">${esc(c.title)}</td>
       <td style="white-space:nowrap"><span class="perc">${perc}</span> ${barra}</td>
       <td>${badgeStato(c.status)}</td>
       <td>${cellaVideo(c)}</td>
@@ -324,7 +362,7 @@ function bloccoCorsiUtente(u) {
       <td>${riapri}</td>
     </tr>`;
   }).join("");
-  return `<details class="utente"${u.courses.some((c) => c.status === "running") ? " open" : ""}>
+  return `<details class="utente" data-utente="${esc(u.username)}"${dettagliAperti(u) ? " open" : ""}>
     <summary>
       <strong>${esc(u.username)}</strong>${u.name ? ` <span class="muto">${esc(u.name)}</span>` : ""}
       <span class="badge b-grigio">${t.total} corsi</span>
@@ -490,10 +528,31 @@ document.getElementById("btn-importa-testo").addEventListener("click", async () 
   aggiorna();
 });
 
-document.body.addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("button[data-azione]");
-  if (!btn) return;
-  const u = btn.dataset.u, c = btn.dataset.c, azione = btn.dataset.azione;
+/* --------------------------------------------------- menu azioni (kebab) */
+
+/* Un menu unico, riposizionato accanto ai tre pallini: cosi' il re-render
+   dei polling non lo chiude mentre lo stai guardando. L'utente su cui agisce
+   sta in menuUtente. */
+let menuUtente = null;
+
+function apriMenu(kebab) {
+  menuUtente = kebab.dataset.menuUtente;
+  const ut = (ultimoStato?.users || []).find((x) => x.username === menuUtente);
+  const menu = document.getElementById("menu-azioni");
+  menu.querySelector('[data-azione="retry"]').style.display = ut?.login_error ? "block" : "none";
+  menu.style.display = "block";
+  const r = kebab.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+  menu.style.top = Math.min(r.bottom + 4, window.innerHeight - h - 8) + "px";
+}
+
+function chiudiMenu() {
+  document.getElementById("menu-azioni").style.display = "none";
+  menuUtente = null;
+}
+
+async function eseguiAzione(azione, u, c) {
   if (azione === "rimuovi" && !confirm(`Rimuovere l'utente ${u} e i suoi dati?`)) return;
   if (azione === "modifica") {
     const ut = (ultimoStato?.users || []).find((x) => x.username === u);
@@ -506,15 +565,33 @@ document.body.addEventListener("click", async (ev) => {
     document.getElementById("dialog-utente").showModal();
     return;
   }
-  btn.disabled = true;
   try {
     if (azione === "rescan") await post(`/api/users/${encodeURIComponent(u)}/rescan`);
     else if (azione === "retry") await post(`/api/users/${encodeURIComponent(u)}/retry`);
     else if (azione === "rimuovi") await fetch(`/api/users/${encodeURIComponent(u)}`, { method: "DELETE" });
     else if (azione === "riapri") await post(`/api/users/${encodeURIComponent(u)}/courses/${encodeURIComponent(c)}/reopen`);
     mostraErrore("");
-  } catch (e) { mostraErrore(e.message); btn.disabled = false; }
+  } catch (e) { mostraErrore(e.message); }
   aggiorna();
+}
+
+document.body.addEventListener("click", async (ev) => {
+  const kebab = ev.target.closest("button[data-menu-utente]");
+  if (kebab) {
+    apriMenu(kebab);
+    return;
+  }
+  const voce = ev.target.closest("#menu-azioni button[data-azione]");
+  if (voce) {
+    const u = menuUtente;
+    chiudiMenu();
+    if (u) await eseguiAzione(voce.dataset.azione, u);
+    return;
+  }
+  if (menuUtente !== null) chiudiMenu();  // click fuori dal menu: chiudilo
+  const btn = ev.target.closest("button[data-azione]");  // bottoni dei corsi
+  if (!btn) return;
+  await eseguiAzione(btn.dataset.azione, btn.dataset.u, btn.dataset.c);
 });
 
 /* ------------------------------------------------------ dialog modifica */
